@@ -29,8 +29,8 @@ import time
 import os
 
 bl_info = {
-    "name": "BetterBlenderCoD",
-    "author": "Ma_rv, CoDEmanX, Flybynyt, SE2Dev",
+    "name": "BlenderCoD",
+    "author": "Ma_rv, CoDEmanX, Flybynyt, SE2Dev, deshayu_, shiversoftdev",
     "version": (0, 8, 0),
     "blender": (3, 00, 0),
     "location": "File > Import  |  File > Export",
