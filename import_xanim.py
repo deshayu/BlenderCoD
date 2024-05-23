@@ -151,7 +151,7 @@ def load_anim(self, context, armature,
             use_notetrack_file=True,
             fps_scale_type='DISABLED',
             fps_scale_target_fps=30,
-            update_scene_range = True,
+            update_frame_range = True,
             update_scene_fps=False,
             anim_offset=0
             ):
@@ -196,7 +196,7 @@ def load_anim(self, context, armature,
     else:
         frame_scale = fps_scale_target_fps / anim.framerate
 
-    if update_scene_range:
+    if update_frame_range:
         frames = [frame.frame for frame in anim.frames]
         scene.frame_start = int(min(frames) * frame_scale)
         scene.frame_end = int(max(frames) * frame_scale)

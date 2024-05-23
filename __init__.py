@@ -351,9 +351,9 @@ class COD_MT_import_xanim(bpy.types.Operator, ImportHelper):
         default=False
     )
 
-    update_scene_range: BoolProperty(
-    name="Update Scene Range",
-    description=("Set the time range to match the action "
+    update_frame_range: BoolProperty(
+    name="Update Frame Range",
+    description=("Set the frame range to match the action "
                     "found in the imported animation"),
     default=True
     )
@@ -404,9 +404,6 @@ class COD_MT_import_xanim(bpy.types.Operator, ImportHelper):
         sub.enabled = self.use_notetracks
         sub.prop(self, 'use_notetrack_file')
 
-        sub = layout.split()
-        sub.prop(self, "update_scene_range")
-
         sub = layout.box()
         split = sub.split(factor=0.55)
         split.label(text="Scale FPS:")
@@ -417,6 +414,7 @@ class COD_MT_import_xanim(bpy.types.Operator, ImportHelper):
             sub.label(text="Target Framerate: %.2f" % context.scene.render.fps)
         elif self.fps_scale_type == 'CUSTOM':
             sub.prop(self, 'fps_scale_target_fps')
+        sub.prop(self, "update_frame_range")
         layout.prop(self, 'anim_offset')
 
 

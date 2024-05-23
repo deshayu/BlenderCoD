@@ -105,11 +105,6 @@ def gather_exportable_objects(self, context,
         if use_selection and not ob.select_get():
             continue
 
-        if len(ob.material_slots) < 1:
-            if not quiet:
-                print("Object '%s' has no materials - skipping..." % ob.name)
-            continue
-
         if use_armature_filter:
             if armature is None:
                 # Defer the check for this object until *after* we know
