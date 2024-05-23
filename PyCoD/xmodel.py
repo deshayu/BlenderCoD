@@ -854,7 +854,9 @@ class Model(XBinIO, object):
                       extended_features=True, header_message=""):
         # If there is no current version, fallback to the argument
         version = validate_version(self, version)
-        
+
+        # Added by shiversoftdev, in BetterBetterBlenderCoD
+
         # NOTE: Cosmetic bones are only used by version 7 and later
         if version == 7:
             cosmetics = len([bone for bone in self.bones if bone.cosmetic])
@@ -885,7 +887,6 @@ class Model(XBinIO, object):
                     for vert in mesh.verts:
                         vert.weights = [(bone_map[old_index], weight)
                                         for old_index, weight in vert.weights]
-
 
         return self.__xbin_writefile_model_internal__(path,
                                                       version,
