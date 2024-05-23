@@ -216,18 +216,6 @@ class COD_MT_import_xmodel(bpy.types.Operator, ImportHelper):
         default=True
     )
 
-    attach_model: BoolProperty(
-        name="Attach Model",
-        description="Attach head to body, gun to hands, etc.",
-        default=False
-    )
-
-    merge_skeleton: BoolProperty(
-        name="Merge Skeletons",
-        description="Merge imported skeleton with the selected skeleton",
-        default=False
-    )
-
     use_image_search: BoolProperty(
         name="Image Search",
         description=("Search subdirs for any associated images "

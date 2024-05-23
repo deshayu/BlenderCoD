@@ -68,12 +68,7 @@ def load(self, context,
 
     target_scale = global_scale
 
-    if use_armature is False:
-        attach_model = False
-
     skel_old = get_armature_for_object(context.active_object)
-    if skel_old is None:
-        attach_model = False
 
     split_meshes = not use_single_mesh
     load_images = True

@@ -552,26 +552,6 @@ def save_model(self, context, filepath, armature, objects,
         for i, mod in enumerate(ob.modifiers):
             mod.show_viewport = mod_states[i]
 
-        # Skip invalid meshes
-        if len(mesh.vertices) < 3:
-            _skip_notice(ob.name, mesh.name, "Less than 3 vertices")
-            mesh.user_clear()
-            bpy.data.meshes.remove(mesh)
-            continue
-        #! mesh.tessfaces is deprecated
-        """if len(mesh.loop_triangles) < 1:
-            _skip_notice(ob.name, mesh.name, "No faces")
-            mesh.user_clear()
-            bpy.data.meshes.remove(mesh)
-            continue"""
-
-        #! DEPRECATED
-        """if not mesh.tessface_uv_textures:
-            _skip_notice(ob.name, mesh.name, "No UV texture, not unwrapped?")
-            mesh.user_clear()
-            bpy.data.meshes.remove(mesh)
-            continue"""
-
         meshes.append(ExportMesh(ob, mesh, materials))
 
     # Build the bone hierarchy & transform matrices
