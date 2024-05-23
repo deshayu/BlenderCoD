@@ -43,79 +43,12 @@ def get_armature_for_object(ob):
 
     return ob.find_armature()
 
-
-def get_armature_modifier_for_object(ob):
-    for mod in ob.modifiers:
-        if mod.type == 'ARMATURE':
-            return mod
-    return None
-
-
 def reassign_children(ebs, bone1, bone2):
     for child in bone2.children:
         kid = ebs[child.name]
         kid.parent = bone1
 
     ebs.remove(bone2)
-
-
-def join_objects(obs):
-    scene = bpy.context.scene
-    context = bpy.context.copy()
-    context['active_object'] = obs[0]
-    context['selected_objects'] = obs
-
-    editable_bases = [scene.object_bases[ob.name] for ob in obs]
-    context['selected_editable_bases'] = editable_bases
-    bpy.ops.object.join(context)
-
-
-def join_armatures(skel1_ob, skel2_ob, skel2_mesh_obs):
-    skel2_mesh_matrices = [mesh.matrix_world.copy() for mesh in skel2_mesh_obs]
-
-    join_objects([skel1_ob, skel2_ob])
-
-    # Ensure that the context is correct
-    bpy.context.scene.objects.active = skel1_ob
-    skel1_ob.select_set(state=True)
-
-    bpy.ops.object.mode_set(mode='EDIT')
-    ebs = skel1_ob.data.edit_bones
-
-    # Reassign all children for any bones that were present in both skeletons
-    for bone in ebs:
-        try:
-            t = ebs[bone.name + ".001"]
-            reassign_children(ebs, bone, t)
-        except:
-            pass
-
-    # Remove the move the duplicates
-    for bone in ebs:
-        if(bone.name.endswith(".001")):
-            ebs.remove(bone)
-
-    if 'j_gun' in ebs and 'tag_weapon' in ebs:
-        ebs['j_gun'].parent = ebs['tag_weapon']
-    elif 'tag_weapon' in ebs and 'tag_weapon_right' in ebs:
-        ebs['tag_weapon'].parent = ebs['tag_weapon_right']
-
-    bpy.ops.object.mode_set(mode='OBJECT')
-
-    # Update the matrices and armature modifier for the mesh objects
-    for mesh_ob, matrix in zip(skel2_mesh_obs, skel2_mesh_matrices):
-        mesh_ob.matrix_world = matrix
-        mod = get_armature_modifier_for_object(mesh_ob)
-        if mod is not None:
-            # Update the existing armature modifier
-            mod.object = skel1_ob
-        else:
-            # Add a new armature modifier
-            mod = mesh_ob.modifiers.new('Armature Rig', 'ARMATURE')
-            mod.object = skel1_ob
-            mod.use_bone_envelopes = False
-            mod.use_vertex_groups = True
-
 
 def load(self, context,
          filepath,
@@ -127,8 +60,6 @@ def load(self, context,
          use_vertex_colors=True,
          use_armature=True,
          use_parents=True,
-         attach_model=False,
-         merge_skeleton=False,
          use_image_search=True):
 
     # Apply unit conversion factor to the scale
@@ -143,9 +74,6 @@ def load(self, context,
     skel_old = get_armature_for_object(context.active_object)
     if skel_old is None:
         attach_model = False
-
-    if not attach_model:
-        merge_skeleton = False
 
     split_meshes = not use_single_mesh
     load_images = True
@@ -519,46 +447,6 @@ def load(self, context,
             modifier.object = skel_obj
             modifier.use_bone_envelopes = False
             modifier.use_vertex_groups = True
-
-        # Attach the new skeleton to the existing one
-        if attach_model and skel_old is not None:
-            """
-            if 'tag_weapon' in skel_old.pose.bones:
-                arm_is_active = True
-                bpy.ops.object.mode_set(mode='EDIT')
-                matrix = skel_old.pose.bones["tag_weapon"].matrix.copy()
-                tag_weapon_mat = matrix
-                bpy.ops.object.mode_set(mode='OBJECT')
-            else:
-                arm_is_active = False
-            """
-
-            if attach_model:
-                skel_obj.parent = skel_old
-            if skel_obj.pose.bones[0].name == "j_gun":
-                skel_obj.parent_bone = "tag_weapon"
-            elif skel_obj.pose.bones[0].name == "tag_weapon":
-                 # Todo - add option to manually specify whether or not the user
-                 #        wants to attach to the left or right hand
-                skel_obj.parent_bone = "tag_weapon_right"
-            else:
-                if skel_obj.pose.bones[0].name in skel_old.pose.bones:
-                    skel_obj.parent_bone = skel_obj.pose.bones[0].name
-                else:
-                    print(("Warning: Armature '%s' may not"
-                           "merge correctly with '%s'") %
-                          (skel_obj.name, skel_old.name))
-                    skel_obj.parent_bone = skel_old.pose.bones[0].name
-            skel_obj.parent_type = 'BONE'
-            skel_obj.location = (0, -1, 0)
-
-            # Is this necessary?
-            bpy.context.view_layer.update()
-
-            # Merge the skeletons together
-            if merge_skeleton:
-                join_armatures(skel_old, skel_obj, mesh_objs)
-                bpy.ops.object.mode_set(mode='POSE')
 
     # view_layer.update()
     bpy.ops.object.mode_set(mode='OBJECT')

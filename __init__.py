@@ -216,16 +216,6 @@ class COD_MT_import_xmodel(bpy.types.Operator, ImportHelper):
         default=True
     )
 
-    """
-    force_connect_children : BoolProperty(
-        name="Force Connect Children",
-        description=("Force connection of children bones to their parent, "
-                     "even if their computed head/tail "
-                     "positions do not match"),
-        default=False,
-    )
-    """  # nopep8
-
     attach_model: BoolProperty(
         name="Attach Model",
         description="Attach head to body, gun to hands, etc.",
@@ -291,15 +281,6 @@ class COD_MT_import_xmodel(bpy.types.Operator, ImportHelper):
             col = layout.column()
             col.enabled = self.use_armature
             col.prop(self, 'use_parents')
-
-            # Possibly support force_connect_children?
-            # sub = col.split()
-            # sub.enabled = self.use_parents
-            # sub.prop(self, 'force_connect_children')
-            col.prop(self, 'attach_model')
-            sub = col.split()
-            sub.enabled = self.attach_model
-            sub.prop(self, 'merge_skeleton')
 
 
 class COD_MT_import_xanim(bpy.types.Operator, ImportHelper):
