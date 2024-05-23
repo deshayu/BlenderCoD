@@ -143,25 +143,23 @@ def load(self, context, apply_unit_scale=False, **keywords):
 
 
 def load_anim(self, context, armature,
-              filepath,
-              global_scale=1.0,
-              use_actions=True,
-              use_actions_skip_existing=False,
-              use_notetracks=True,
-              use_notetrack_file=True,
-              fps_scale_type='DISABLED',
-              fps_scale_target_fps=30,
-              update_scene_fps=False,
-              anim_offset=0
-              ):
+            filepath,
+            global_scale=1.0,
+            use_actions=True,
+            use_actions_skip_existing=False,
+            use_notetracks=True,
+            use_notetrack_file=True,
+            fps_scale_type='DISABLED',
+            fps_scale_target_fps=30,
+            update_scene_range = True,
+            update_scene_fps=False,
+            anim_offset=0
+            ):
     '''
     Load a specific XAnim file
     returns the XAnim() on success or an error message / None on failure
     '''
-
-    # TEMP: Used to update the scene frame range based on the anim
-    update_scene_range = False
-
+    
     # Load the anim
     anim = XAnim.Anim()
     ext = os.path.splitext(filepath)[-1].upper()
@@ -200,14 +198,14 @@ def load_anim(self, context, armature,
 
     if update_scene_range:
         frames = [frame.frame for frame in anim.frames]
-        scene.frame_start = min(frames) * frame_scale
-        scene.frame_end = max(frames) * frame_scale
+        scene.frame_start = int(min(frames) * frame_scale)
+        scene.frame_end = int(max(frames) * frame_scale)
 
         # Adjust the frame shift so that if the first frame doesn't move when
         #  the anim gets scaled, apply the anim_offset on top of that
         frame_shift = anim_offset - scene.frame_start
-        scene.frame_start = scene.frame_start - frame_shift
-        scene.frame_end = scene.frame_end - frame_shift
+        scene.frame_start = int(scene.frame_start - frame_shift)
+        scene.frame_end = int(scene.frame_end - frame_shift)
     else:
         frame_shift = anim_offset
 

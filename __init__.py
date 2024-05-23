@@ -382,6 +382,13 @@ class COD_MT_import_xanim(bpy.types.Operator, ImportHelper):
         default=False
     )
 
+    update_scene_range: BoolProperty(
+    name="Update Scene Range",
+    description=("Set the time range to match the action "
+                    "found in the imported animation"),
+    default=True
+    )
+
     anim_offset: FloatProperty(
         name="Animation Offset",
         description="Offset to apply to animation during import, in frames",
@@ -427,6 +434,9 @@ class COD_MT_import_xanim(bpy.types.Operator, ImportHelper):
         sub = layout.split()
         sub.enabled = self.use_notetracks
         sub.prop(self, 'use_notetrack_file')
+
+        sub = layout.split()
+        sub.prop(self, "update_scene_range")
 
         sub = layout.box()
         split = sub.split(factor=0.55)
