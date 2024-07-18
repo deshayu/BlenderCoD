@@ -25,6 +25,7 @@ import array
 from mathutils import *
 from math import *
 from bpy_extras.image_utils import load_image
+from mathutils import Vector
 
 from . import shared as shared
 from .PyCoD import xmodel as XModel
@@ -42,6 +43,12 @@ def get_armature_for_object(ob):
         return ob
 
     return ob.find_armature()
+
+def get_armature_modifier_for_object(ob):
+    for mod in ob.modifiers:
+        if mod.type == 'ARMATURE':
+            return mod
+    return None
 
 def reassign_children(ebs, bone1, bone2):
     for child in bone2.children:
@@ -76,6 +83,22 @@ def load(self, context,
     scene = bpy.context.scene
     view_layer = bpy.context.view_layer
 
+# Check if there are any objects in the scene
+    if bpy.context.scene.objects:
+        # Set the first object in the scene as the active object
+        bpy.context.view_layer.objects.active = bpy.context.scene.objects[0]
+    else:
+        # If there are no objects in the scene, create a new empty object and set it as active
+        bpy.ops.object.empty_add()
+        bpy.context.view_layer.objects.active = bpy.context.active_object
+
+    # Check if an active object is set
+    if bpy.context.view_layer.objects.active:
+        # Switch to object mode
+        bpy.ops.object.mode_set(mode='OBJECT')
+    else:
+        print("No active object selected or created. Please ensure there are objects in the scene.")
+        
     # Load the model
     model_name = os.path.basename(filepath)
     model = XModel.Model(('.').join(model_name.split('.')[:-1]))
@@ -130,53 +153,6 @@ def load(self, context,
                         image = bpy.data.images[image_name]
                     else:
                         image = material_images[image_name]
-
-                    # DEPRECATED
-                    '''
-                    # Create the texture - We exclude the extension in the
-                    #  texture name
-                    texture_name = os.path.splitext(image_name)[0]
-                    if texture_name in bpy.data.textures:
-                        tex = bpy.data.textures[texture_name]
-                    else:
-                        tex = bpy.data.textures.new(texture_name, 'IMAGE')
-                        tex.image = image
-
-                    if image_type == 'color':
-                        deferred_textures.append(tex)
-                        continue
-                    else:
-                        slot = mat.texture_slots.add()
-                        slot.texture = tex
-                        slot.use_map_color_diffuse = False
-                        slot.use_map_alpha = False
-                        if image_type == 'normal':
-                            slot.normal_factor = True
-                    '''
-
-                # DEPRECATED
-                '''
-                # Add the deferred_textures
-                for tex in deferred_textures:
-                    slot = mat.texture_slots.add()
-                    slot.texture = tex
-                    slot.use_map_color_diffuse = True
-                    if tex.image is not None and tex.image.channels > 3:
-                        # Enable Transparency
-                        slot.use_map_alpha = True
-                        slot.alpha_factor = 1.0
-                        # NOTE: Decide when use_transparency is needed
-                        #       I haven't been able to figure out a way
-                        #        to deterime this
-                        mat.use_transparency = True
-                        mat.transparency_method = 'Z_TRANSPARENCY'
-                        # Prevent specular from showing on transparent parts
-                        # NOTE: 'RAYTRACE' transparency_method has specular
-                        #        highlights show up regardless
-                        mat.specular_alpha = 0.0
-                    mat.alpha = 0
-                '''
-
         else:
             if mat not in materials:
                 print("Material '%s' already exists!" % material.name)
@@ -210,10 +186,8 @@ def load(self, context,
 
         # Contains vertex mapping data for all verts that the dup faces use
         dup_verts_mapping = [None] * len(sub_mesh.verts)
-
-        used_faces = []  # List of all faces that were used in the model
-
-        loop_normals = []  # List of normals for every added loop (face vertex)
+        used_faces = []
+        loop_normals = []
 
         # Tracks how many faces in the current mesh use a given material
         material_usage_counts = [0] * len(materials)
@@ -326,14 +300,7 @@ def load(self, context,
 
         # Custom Normals
         if use_custom_normals:
-            # Store 'temp' normals in loops, since validate() may alter the
-            #  final mesh.
-            # We can only set custom loop normals *after* calling it.
-            mesh.create_normals_split()
-
-            # Iterate over every single loop (every vert for every face)
-            for loop_index, loop in enumerate(mesh.loops):
-                mesh.loops[loop_index].normal = loop_normals[loop_index]
+            calculate_split_normals(mesh)
 
             # *Very* important to not remove loop normals here!
             mesh.validate(clean_customdata=False)
@@ -348,14 +315,6 @@ def load(self, context,
             mesh.polygons.foreach_set("use_smooth", [True] * polygon_count)
 
             mesh.normals_split_custom_set(tuple(zip(*(iter(clnors),) * 3)))
-            mesh.use_auto_smooth = True
-
-            # This was used to highlight sharp edges in legacy versions
-            # In Blender 2.8x, it uses the View3D Overlay API - but since
-            # it's enabled by default in those versions, we don't need any
-            # special code
-            # mesh.show_edge_sharp = True
-
         else:
             mesh.validate()
 
@@ -392,14 +351,6 @@ def load(self, context,
                     color_map = material.images['color']
                     if color_map in bpy.data.images:
                         material_image_map[index] = bpy.data.images[color_map]
-
-            # DEPRECATED
-            '''
-            # Assign the image for each face
-            uv_faces = mesh.uv_textures[0].data
-            for index, face in enumerate(used_faces):
-                uv_faces[index].image = material_image_map[face.material_id]
-            '''
 
     if use_armature:
         # Create the skeleton
@@ -443,5 +394,65 @@ def load(self, context,
             modifier.use_bone_envelopes = False
             modifier.use_vertex_groups = True
 
+
     # view_layer.update()
+
+def manual_calc_normal(face):
+    """ Manually calculate the normal for a face """
+    verts = face.verts
+    if len(verts) < 3:
+        return Vector((0.0, 0.0, 0.0))
+    
+    v0, v1, v2 = verts[:3]
+    edge1 = v1.co - v0.co
+    edge2 = v2.co - v0.co
+    normal = edge1.cross(edge2).normalized()
+    return normal
+
+def calculate_face_normals(bm):
+    """ Calculate the normal for each face """
+    for face in bm.faces:
+        face.normal = manual_calc_normal(face)
+
+def calculate_split_normals(mesh):
+    # Ensure we are in object mode
     bpy.ops.object.mode_set(mode='OBJECT')
+
+    # Create a BMesh object from the mesh data
+    bm = bmesh.new()
+    bm.from_mesh(mesh)
+    
+    # Calculate face normals
+    calculate_face_normals(bm)
+
+    # Prepare a list to store calculated loop normals
+    loop_normals = []
+
+    # Calculate split normals
+    for face in bm.faces:
+        face_normal = face.normal
+        for loop in face.loops:
+            vertex = loop.vert
+            edge = loop.edge
+
+            if edge.smooth:
+                normal_sum = Vector((0.0, 0.0, 0.0))
+                linked_faces_count = 0
+                for linked_face in vertex.link_faces:
+                    normal_sum += linked_face.normal
+                    linked_faces_count += 1
+                if linked_faces_count > 0:
+                    loop_normal = (normal_sum / linked_faces_count).normalized()
+            else:
+                loop_normal = face_normal
+
+            loop_normals.append(loop_normal)
+
+    # Assign calculated normals to the mesh
+    mesh.normals_split_custom_set(loop_normals)
+    
+    # Update the mesh to apply changes
+    mesh.update()
+    
+    # Free BMesh
+    bm.free()

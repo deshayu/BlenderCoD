@@ -444,7 +444,7 @@ class COD_MT_export_xmodel(bpy.types.Operator, ExportHelper):
                 "Raw text format used from CoD1-CoD:BO"),
                ('XMODEL_BIN', "XMODEL_BIN",
                 "Binary model format used by CoD:BO3")),
-        default='XMODEL_EXPORT'
+        default='XMODEL_BIN'
     )
 
     version: EnumProperty(
@@ -453,7 +453,7 @@ class COD_MT_export_xmodel(bpy.types.Operator, ExportHelper):
         items=(('5', "Version 5", "vCoD, CoD:UO"),
                ('6', "Version 6", "CoD2, CoD4, CoD:WaW, CoD:BO"),
                ('7', "Version 7", "CoD:BO3")),
-        default='6'
+        default='7'
     )
 
     use_selection: BoolProperty(

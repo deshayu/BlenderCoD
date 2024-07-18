@@ -47,25 +47,37 @@ def deserialize_image_string(ref_string):
     return out
 
 
+def replace_symbols_and_caps(s):
+    replaced = ''
+    for c in s:
+        if not c.isalnum():
+            replaced += '_'  # Replace symbols with '!'
+        elif c.isupper():
+            replaced += c.lower()  # Replace caps with lowercase letters
+        else:
+            replaced += c
+    return replaced
+
 def serialize_image_string(image_dict, extended_features=True):
-    if extended_features is True:
+    if extended_features:
         out = ""
         prefix = ''
         for key, value in image_dict.items():
+            key = replace_symbols_and_caps(key)
+            value = replace_symbols_and_caps(value)
             out += "%s%s:%s" % (prefix, key, value)
             prefix = ' '
         return out
     else:
-        # For xmodel_export version 5, the material name and image ref
-        #  may be the same -
-        # in which case - the image dict extension shouldn't be used
-        if 'color' in image_dict:  # use the color map
+        if 'color' in image_dict:
             return image_dict['color']
-        elif image_dict != 0:  # if it cant be found, grab the first image
-            key, value = image_dict.items()[0]
-            return value
+        elif image_dict and not isinstance(image_dict, int):
+            # Replace symbols and caps in the single key-value pair
+            key, value = next(iter(image_dict.items()))
+            key = replace_symbols_and_caps(key)
+            value = replace_symbols_and_caps(value)
+            return "%s:%s" % (key, value)
         return ""
-
 
 class Bone(object):
     __slots__ = ('name', 'parent', 'offset', 'matrix', 'scale', 'cosmetic')
@@ -854,40 +866,6 @@ class Model(XBinIO, object):
                       extended_features=True, header_message=""):
         # If there is no current version, fallback to the argument
         version = validate_version(self, version)
-
-        # Added by shiversoftdev, in BetterBetterBlenderCoD
-
-        # NOTE: Cosmetic bones are only used by version 7 and later
-        if version == 7:
-            cosmetics = len([bone for bone in self.bones if bone.cosmetic])
-            if cosmetics > 0:
-
-                # Cosmetic bones MUST be written AFTER the standard bones in
-                #  the bone info list, so we need to generate a sorted list
-                #  of index/bone pairs
-                bone_enum = sorted(enumerate(self.bones),
-                                   key=lambda kvp: kvp[1].cosmetic)
-
-                # Allocate space for the bone map before any
-                #  modifications to self.bones
-                bone_map = [None] * len(self.bones)
-
-                # Update the bone list & build old->new index map
-                index_map, self.bones = zip(*bone_enum)
-                for new, old in enumerate(index_map):
-                    bone_map[old] = new
-
-                # Rebuild the parent indices for all non-root bones
-                for bone in self.bones:
-                    if bone.parent != -1:
-                        bone.parent = bone_map[bone.parent]
-
-                # Rebuild the weight tables for all vertices
-                for mesh in self.meshes:
-                    for vert in mesh.verts:
-                        vert.weights = [(bone_map[old_index], weight)
-                                        for old_index, weight in vert.weights]
-
         return self.__xbin_writefile_model_internal__(path,
                                                       version,
                                                       extended_features,

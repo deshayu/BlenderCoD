@@ -52,7 +52,7 @@ def get_mat_rest(pose_bone, mat_pose_parent, mat_local_parent):
                 mat_size[i][i] = mat_pose_parent.col[i].magnitude
             mat_rotscale = mat_size @ mat_local_parent @ mat_offs
 
-        elif not bone.use_inherit_scale:
+        elif not bone.inherit_scale:
             mat_rotscale = mat_pose_parent.normalized() @ mat_offs
 
         else:
@@ -204,8 +204,8 @@ def load_anim(self, context, armature,
         # Adjust the frame shift so that if the first frame doesn't move when
         #  the anim gets scaled, apply the anim_offset on top of that
         frame_shift = anim_offset - scene.frame_start
-        scene.frame_start = int(scene.frame_start - frame_shift)
-        scene.frame_end = int(scene.frame_end - frame_shift)
+        scene.frame_start = int(scene.frame_start + frame_shift)
+        scene.frame_end = int(scene.frame_end + frame_shift)
     else:
         frame_shift = anim_offset
 
