@@ -30,9 +30,9 @@ import os
 
 bl_info = {
     "name": "BlenderCoD",
-    "author": "Ma_rv, CoDEmanX, Flybynyt, SE2Dev, deshayu_, shiversoftdev",
-    "version": (0, 8, 0),
-    "blender": (3, 00, 0),
+    "author": "Ma_rv, CoDEmanX, Flybynyt, SE2Dev, tupivere_, shiversoftdev",
+    "version": (0, 9, 0),
+    "blender": (4, 10, 0),
     "location": "File > Import  |  File > Export",
     "description": "Import/Export XModels and XAnims",
     "wiki_url": "https://github.com/marv7000/BetterBlenderCOD/",
