@@ -31,11 +31,11 @@ import os
 bl_info = {
     "name": "BlenderCoD",
     "author": "Ma_rv, CoDEmanX, Flybynyt, SE2Dev, tupivere_, shiversoftdev",
-    "version": (0, 9, 0),
-    "blender": (4, 10, 0),
+    "version": (0, 9, 5),
+    "blender": (4, 1, 0),
     "location": "File > Import  |  File > Export",
     "description": "Import/Export XModels and XAnims",
-    "wiki_url": "https://github.com/marv7000/BetterBlenderCOD/",
+    "wiki_url": "https://github.com/deshayu/BlenderCoD/wiki",
     "tracker_url": "https://github.com/marv7000/BetterBlenderCOD/issues/",
     "support": "COMMUNITY",
     "category": "Import-Export"
@@ -719,13 +719,13 @@ class COD_MT_export_xanim(bpy.types.Operator, ExportHelper):
                 "Raw text format used from CoD1-CoD:BO"),
                ('XANIM_BIN', "XANIM_BIN",
                 "Binary animation format used by CoD:BO3")),
-        default='XANIM_EXPORT'
+        default='XANIM_BIN'
     )
 
     use_selection: BoolProperty(
         name="Selection Only",
         description="Export selected bones only (pose mode)",
-        default=False
+        default=True
     )
 
     global_scale: FloatProperty(

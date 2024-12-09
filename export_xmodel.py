@@ -95,10 +95,14 @@ def gather_exportable_objects(self, context,
         return False
 
     for ob in bpy.data.objects:
-        # Either grab the active armature - or the first armature in the scene
+        # Why didn't it check for hidden objects????
+        if ob.hide_get() or not ob.visible_get():
+            continue
+
+        # Rest of your code here
         if (ob.type == 'ARMATURE' and use_armature and
             (armature is None or ob == context.active_object) and
-                len(ob.data.bones) > 0):
+            len(ob.data.bones) > 0):
             armature = ob
             continue
 
@@ -120,9 +124,12 @@ def gather_exportable_objects(self, context,
         obs.append(ob)
 
     # Perform a secondary filter pass on all objects we missed
-    #  (before the armature was found)
+    # (before the armature was found)
     if use_armature_filter:
         for ob in secondary_objects:
+            if ob.hide_get() or not ob.visible_get():
+                continue
+
             if test_armature_filter(ob):
                 obs.append(ob)
 
@@ -281,9 +288,15 @@ class ExportMesh(object):
         mesh = XModel.Mesh(self.mesh.name)
 
         if self.mesh.has_custom_normals:
-            calculate_split_normals(self.mesh)
+            if bpy.app.version < (4, 1, 0):
+                self.mesh.calc_normals_split()
+            else:
+                calculate_split_normals(self.mesh)
         else:
-            self.mesh.calc_normals()
+            if bpy.app.version < (4, 1, 0):
+                self.mesh.calc_normals()
+            else:
+                calculate_face_normals(self.mesh)
 
         uv_layer = self.mesh.uv_layers.active
         vc_layer = self.mesh.vertex_colors.active

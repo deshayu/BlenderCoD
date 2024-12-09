@@ -83,7 +83,7 @@ def load(self, context,
     scene = bpy.context.scene
     view_layer = bpy.context.view_layer
 
-# Check if there are any objects in the scene
+    # Check if there are any objects in the scene
     if bpy.context.scene.objects:
         # Set the first object in the scene as the active object
         bpy.context.view_layer.objects.active = bpy.context.scene.objects[0]
@@ -91,9 +91,17 @@ def load(self, context,
         # If there are no objects in the scene, create a new empty object and set it as active
         bpy.ops.object.empty_add()
         bpy.context.view_layer.objects.active = bpy.context.active_object
+        empty_object = bpy.context.active_object
 
     # Check if an active object is set
     if bpy.context.view_layer.objects.active:
+        # Why didn't it check for hidden objects????
+        if bpy.context.view_layer.objects.active.hide_get():
+            # Find a visible object
+            for obj in bpy.context.view_layer.objects:
+                if not obj.hide_get() or not obj.visible_get():
+                    bpy.context.view_layer.objects.active = obj
+                    break
         # Switch to object mode
         bpy.ops.object.mode_set(mode='OBJECT')
     else:
@@ -300,7 +308,11 @@ def load(self, context,
 
         # Custom Normals
         if use_custom_normals:
-            calculate_split_normals(mesh)
+            
+            if bpy.app.version < (4, 1, 0):
+                mesh.calc_normals_split()
+            else:
+                calculate_split_normals(mesh)
 
             # *Very* important to not remove loop normals here!
             mesh.validate(clean_customdata=False)
@@ -323,7 +335,10 @@ def load(self, context,
             mesh.polygons.foreach_set("use_smooth", [True] * polygon_count)
 
             # Use Auto-generated Normals
-            mesh.calc_normals()
+            if bpy.app.version < (4, 1, 0):
+                mesh.calc_normals()
+            else:
+                calculate_face_normals(mesh)
 
         if split_meshes:
             obj_name = "%s_%s" % (model.name, mesh.name)
@@ -394,7 +409,9 @@ def load(self, context,
             modifier.use_bone_envelopes = False
             modifier.use_vertex_groups = True
 
-
+    # Delete the empty object
+    if 'empty_object' in locals():
+        bpy.data.objects.remove(empty_object, do_unlink=True)
     # view_layer.update()
 
 def manual_calc_normal(face):
