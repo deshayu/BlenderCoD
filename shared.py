@@ -18,11 +18,20 @@
 
 # <pep8 compliant>
 
+import bpy
+
 plugin_preferences = None
 
+XMODEL_VERSION = {
+    "CoD1" : 5,
+    "CoD2" : 6,
+    "CoD4" : 6,
+    "CoD5" : 6,
+    "CoD7" : 6,
+    "CoD12": 7
+}
 
 def get_metadata_string(filepath):
-    import bpy
     msg = "// Exported using Blender v%s\n" % bpy.app.version_string
     msg += "// Export filename: '%s'\n" % filepath.replace("\\", "/")
     if bpy.data.filepath is None:

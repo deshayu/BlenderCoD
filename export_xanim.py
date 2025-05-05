@@ -17,110 +17,22 @@
 # ##### END GPL LICENSE BLOCK #####
 
 # <pep8 compliant>
-
 import os
 import bpy
-from string import Template
 
-from . import shared as shared
+from . import shared
+from string import Template
 from .PyCoD import xanim as XAnim
 
+# Pre-define TAG_ALIGN constants
+TAG_ALIGN_MATRIX = [(1, 0, 0), (0, 1, 0), (0, 0, 1)]
+TAG_ALIGN_OFFSET = (0, 0, 0)
 
-class CustomTemplate(Template):
-    delimiter = '%'
-    idpattern = r'[a-z][a-z0-9]*'
+# XANIM SETTINGS
+XANIM_VERSION = 3
 
-    def format(self, action, base, number):
-        args = {'d': number, 'number': number,
-                's': action, 'action': action,
-                'b': base,   'base': base}
-        return self.substitute(args)
-
-
-def calc_frame_range(action):
-    '''
-    action.frame_range is inaccurate for actions with 0 or 1 keyframe(s)
-    This function returns the real (inclusive) frame range for a given action
-    '''
-    if len(action.fcurves) == 0:
-        return (0, 0)
-    keys = [fcurve.keyframe_points for fcurve in action.fcurves]
-    points = [point for keyframe_points in keys for point in keyframe_points]
-    frames = [point.co[0] for point in points]
-    return (min(frames), max(frames))
-
-
-def export_action(self, context, progress, action,
-                  filepath,
-                  target_format,
-                  global_scale=1.0,
-                  framerate=30,
-                  frame_range=None,
-                  use_selection=True,
-                  use_notetracks=False,
-                  use_notetrack_file=False,
-                  use_notetrack_mode='ACTION'
-                  ):
-
-    ob = context.object
-
-    anim = XAnim.Anim()
-    anim.version = 3
-
-    anim.framerate = framerate
-
-    # Determine which bones will be exported for this action
-    if use_selection:
-        pose_bones = context.selected_pose_bones
-    else:
-        pose_bones = ob.pose.bones
-
-    for bone in pose_bones:
-        anim.parts.append(XAnim.PartInfo(bone.name))
-
-    # Fallback to ACTION frame range mode if none set
-    if frame_range is None:
-        frame_range = calc_frame_range(action)
-
-    for frame_number in range(int(frame_range[0]), int(frame_range[1]) + 1):
-        # Set frame directly
-        context.scene.frame_set(frame_number)
-
-        # Add the animation data for each bone
-        frame = XAnim.Frame(frame_number)
-        for bone in pose_bones:
-            offset = tuple(bone.head * global_scale)
-            m = bone.matrix.to_3x3().transposed()
-            matrix = [tuple(v) for v in m]
-            part = XAnim.FramePart(offset, matrix)
-            frame.parts.append(part)
-        anim.frames.append(frame)
-
-    if use_notetracks:
-        if use_notetrack_mode == 'SCENE':
-            markers = context.scene.timeline_markers
-        elif use_notetrack_mode == 'ACTION':
-            markers = action.pose_markers
-        else:
-            # This should never happen!
-            markers = []
-
-        notes = [XAnim.Note(marker.frame, marker.name) for marker in markers]
-        anim.notes = notes
-
-    # Write the XANIM_EXPORT file (and NT_EXPORT file if enabled)
-    header_msg = shared.get_metadata_string(filepath)
-    if target_format == 'XANIM_BIN':
-        anim.WriteFile_Bin(filepath,
-                           header_message=header_msg)
-    else:
-        anim.WriteFile_Raw(filepath,
-                           header_message=header_msg,
-                           embed_notes=(not use_notetrack_file))
-    return
-
-
-def save(self, context, filepath="",
+def save(self, context,
+         filepath,
          target_format='XANIM_BIN',
          use_selection=True,
          global_scale=1.0,
@@ -128,73 +40,114 @@ def save(self, context, filepath="",
          use_all_actions=False,
          filename_format="%action",
          use_notetracks=True,
-         use_notetrack_mode='ACTION',
          use_notetrack_file=False,
-         use_notetrack_format='1',  # TODO: Implement Notetrack Formats
+         use_notetrack_mode='ACTION',
          use_frame_range_mode='ACTION',
          frame_start=1,
          frame_end=250,
          use_custom_framerate=False,
-         use_framerate=30
-         ):
-
-    if not use_notetracks:
-        use_notetrack_file = False
-
-    # Apply unit conversion factor to the scale
-    if apply_unit_scale:
-        global_scale /= shared.calculate_unit_scale_factor(context.scene)
-
-    ob = bpy.context.object
+         use_framerate=30,
+         write_tag_align=False): # Added this for TAG_ALIGN
+    
+    # Pre-fetch context and scene properties
+    ob = bpy.context.object # da object
+    scene = bpy.context.scene
+    original_frame = scene.frame_current
+    original_action = ob.animation_data.action
+    
+    # check 'cos blender's a whiny shit
+    if not (ob := bpy.context.object):
+        return "Error: No object selected!"
     if ob.type != 'ARMATURE':
-        return "An armature must be selected!"
+        return "Error: Selected object must be an armature!"
+    if not ob.animation_data:
+        return "Error: Armature has no animation data!"
 
-    if ob.animation_data is None:
-        return "The selected armature has no animation data!"
+    # Still Don't know why the addon has this
+    if apply_unit_scale:
+        global_scale /= shared.calculate_unit_scale_factor(bpy.context.scene)
 
-    # TODO: Progress counter
-    progress = None
+    # Precompute common values for framerate, filename template, and filepath handling
+    framerate = use_framerate if use_custom_framerate else scene.render.fps
+    filename_template = Template(filename_format)
+    filename_template.delimiter = '%'
 
-    actions = []
-    if use_all_actions:
-        actions = bpy.data.actions
-    else:
-        actions = [ob.animation_data.action]
-
-    frame_original = context.scene.frame_current
-    action_original = ob.animation_data.action
-
-    # Determine the framerate based on use_custom_framerate
-    if not use_custom_framerate:
-        framerate = context.scene.render.fps
-    else:
-        framerate = use_framerate
-
-    # Determine the frame range based on use_frame_range_mode
-    if use_frame_range_mode == 'SCENE':
-        frame_range = (context.scene.frame_start, context.scene.frame_end)
-    elif use_frame_range_mode == 'CUSTOM':
-        frame_range = (frame_start, frame_end)
-    else:
-        frame_range = None
-
-    filename_format = CustomTemplate(filename_format)
+    # Get the file path and base name, ensuring it has the appropriate extension
     path = os.path.dirname(filepath) + os.sep
-    basename, ext = os.path.splitext(os.path.basename(filepath))
-    for index, action in enumerate(actions):
-        if use_all_actions:
-            filename = filename_format.format(action.name, basename, index)
-            filepath = path + filename + "." + target_format
-            ob.animation_data.action = action
-        export_action(self, context, progress, action, filepath,
-                      target_format,
-                      global_scale,
-                      framerate,
-                      frame_range,
-                      use_selection,
-                      use_notetracks,
-                      use_notetrack_file,
-                      use_notetrack_mode)
+    base_name, ext = os.path.splitext(os.path.basename(filepath))
 
-    ob.animation_data.action = action_original
-    context.scene.frame_set(frame_original)
+    # If no extension is provided, append the correct one based on target format
+    if not ext:
+        ext = '.xanim_bin' if target_format == 'XANIM_BIN' else '.xanim_export'
+        filepath = f"{filepath}{ext}"
+
+    # Precompute this to help if use_all_actions.
+    target_format_lower = target_format.lower()
+
+    # Get actions and pose bones
+    actions = bpy.data.actions if use_all_actions else [ob.animation_data.action]
+    pose_bones = bpy.context.selected_pose_bones if use_selection else ob.pose.bones
+
+    for index, action in enumerate(actions):
+        # Setup action-specific file path
+        if use_all_actions:
+            filename = filename_template.substitute(action=action.name, base=base_name, number=index)
+            action_filepath = f"{path}{filename}.{target_format_lower}"
+            ob.animation_data.action = action
+        else:
+            action_filepath = filepath
+
+        # Initialize the animation with version, framerate, and pose bones as parts
+        anim = XAnim.Anim()
+        anim.version = 3
+        anim.framerate = framerate
+        anim.parts.extend(XAnim.PartInfo(bone.name) for bone in pose_bones)
+
+        if write_tag_align:
+            anim.parts.append(XAnim.PartInfo("TAG_ALIGN"))
+
+        # Determine frame range
+        if use_frame_range_mode == 'ACTION':
+            frames = [kp.co[0] for fc in action.fcurves for kp in fc.keyframe_points]
+            frame_start, frame_end = (min(frames), max(frames)) if frames else (0, 0)
+        elif use_frame_range_mode == 'SCENE':
+            frame_start, frame_end = scene.frame_start, scene.frame_end
+        elif use_frame_range_mode == 'CUSTOM':
+            frame_start, frame_end = self.frame_start, self.frame_end
+
+        # Process frames
+        for frame_num in range(int(frame_start), int(frame_end) + 1):
+            bpy.context.scene.frame_set(frame_num)
+            frame = XAnim.Frame(frame_num)
+            for bone in pose_bones:
+                offset = tuple(bone.head * global_scale)
+                matrix = [tuple(row) for row in bone.matrix.to_3x3().transposed()]
+                frame.parts.append(XAnim.FramePart(offset, matrix))
+            
+            # Write TAG_ALIGN if enabled
+            if write_tag_align:
+                frame.parts.append(XAnim.FramePart(TAG_ALIGN_OFFSET, TAG_ALIGN_MATRIX))
+            
+            anim.frames.append(frame)
+
+        # Process notetracks
+        if use_notetracks:
+            if use_notetrack_mode == 'SCENE':
+                markers = bpy.context.scene.timeline_markers
+            elif use_notetrack_mode == 'ACTION':
+                markers = action.pose_markers
+            else:
+                markers = []
+
+            anim.notes.extend(XAnim.Note(marker.frame, marker.name) for marker in markers)
+
+        # Metadata, everything is in shared
+        metadata = shared.get_metadata_string(action_filepath)
+        if target_format == 'XANIM_BIN':
+            anim.WriteFile_Bin(action_filepath, header_message=metadata)
+        else:
+            anim.WriteFile_Raw(action_filepath, header_message=metadata, embed_notes=not use_notetrack_file)
+
+    # Restore original state
+    ob.animation_data.action = original_action
+    bpy.context.scene.frame_set(original_frame)

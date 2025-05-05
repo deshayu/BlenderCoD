@@ -753,14 +753,16 @@ class XBinIO(object):
             return frame.frame
 
         def LoadNotetracksBegin(file):
-            # Activate a dummy frame, as notetracks sometimes contain part
-            # indices.
-            # If the active_frame isn't reset, the bone data for
-            #  the most recently loaded frame will be corrupted
+            # Always initialize dummy frame for safety
             dummy_frame = XAnim.Frame(-1)
             dummy_frame.parts = [None] * len(self.parts)
             state.active_frame = dummy_frame
-            XBlock.LoadInt16Block(file)
+            
+            # Only read if we're sure this block contains data
+            try:
+                return XBlock.LoadInt16Block(file)
+            except:
+                return 0
 
         def LoadNoteFrame(file):
             frame, string = XBlock.LoadNoteFrameBlock(file)
@@ -822,11 +824,13 @@ class XBinIO(object):
             0xB917: ("NumFrames block", LoadFrameCount),
             0xC723: ("Frame block", LoadFrameIndex),
 
+            0x7A6C: ("NumKeys block", XBlock.LoadInt16Block),
+            0x1675: ("Note frame block", LoadNoteFrame),
+            
+            # You will never see these unless you used exportx
             0xC7F3: ("Notetrack section block", LoadNotetracksBegin),
             0x9016: ("NumTracks block", XBlock.LoadInt16Block),
-            0x7A6C: ("NumKeys block", XBlock.LoadInt16Block),
             0x4643: ("Notetrack block", XBlock.LoadInt16Block),
-            0x1675: ("Note frame block", LoadNoteFrame),
 
             # Misc (Unimplemented)
             0xBCD4: ("FIRSTFRAME", None),
@@ -839,31 +843,27 @@ class XBinIO(object):
             0x6EEE: ("EXTRA", XBlock.SkipExtraData)
         }
 
-        # Read all blocks
+        # Shitty block reader
         data = file.read(2)
         while data:
             block_hash = struct.unpack('H', data)[0]
-            if block_hash in hashmap:
-                offset = file.tell()
-                data = hashmap[block_hash]
-                if data[1] is None:
-                    raise NotImplementedError(
-                        "Unimplemented Block '%s' at 0x%X" %
-                        (data[0], offset))
-                else:
-                    if LOG_BLOCKS:
-                        print("Loading Block: '%s' at 0x%X" %
-                              (data[0], offset))
-                    val = data[1](file)
-                    if LOG_BLOCKS:
-                        print("        Data: %s" % repr(val))
-
-                # Read the next block hash
+            
+            # Skip padding and optional blocks
+            if block_hash == 0x0 or hashmap.get(block_hash, (None, None))[1] is None: # Friggin porter
                 data = file.read(2)
-            else:
-                offset = file.tell() - 2
-                raise ValueError("Unknown Block Hash 0x%X at 0x%X" %
-                                 (block_hash, offset))
+                continue
+                
+            try:
+                name, handler = hashmap[block_hash]
+                if LOG_BLOCKS:
+                    print(f"Loading {name} at 0x{file.tell()-2:X}")
+                handler(file)
+            except KeyError:
+                print(f"Warning: Unknown block 0x{block_hash:X} at 0x{file.tell()-2:X}")
+                data = file.read(2)
+                continue
+                
+            data = file.read(2)
 
         # Return the dummy mesh for splitting if we imported a model
         if state.asset_type == 'MODEL':

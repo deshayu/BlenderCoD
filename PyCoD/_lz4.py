@@ -1,9 +1,17 @@
 try:
-    # Try to import the python-lz4 package
     import lz4.block
 
 except ImportError:
-    # If python-lz4 isn't present, fallback to using pure python
+    # If python-lz4 isn't present, install it using Blender's bundled Python
+    import subprocess
+    import sys
+
+    subprocess.check_call([sys.executable, "-m", "ensurepip"])
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "lz4"])
+
+    import lz4.block
+
+    # Proceed with fallback to pure Python if lz4 is still not available
     from io import BytesIO
 
     try:

@@ -16,31 +16,40 @@
 #
 # ##### END GPL LICENSE BLOCK #####
 
+import os
+import importlib
 
 import bpy
 from bpy.types import Operator, AddonPreferences
-from bpy.props import (BoolProperty, IntProperty, FloatProperty,
-                       StringProperty, EnumProperty, CollectionProperty)
+from bpy.props import BoolProperty, IntProperty, FloatProperty, StringProperty, EnumProperty, CollectionProperty
 from bpy_extras.io_utils import ExportHelper, ImportHelper
-
 from bpy.utils import register_class, unregister_class
 
-import time
-import os
+from . import shared
+
+# List of modules to be reloaded/imported
+modules = ['shared', 'import_xmodel', 'import_xanim', 'export_xmodel', 'export_xanim']
+
+for module in modules:
+    # Dynamically import the module if not already imported
+    if module not in globals():
+        globals()[module] = importlib.import_module(f".{module}", package=__name__)
+    # Reload the module
+    importlib.reload(globals()[module])
 
 bl_info = {
     "name": "BlenderCoD",
-    "author": "Ma_rv, CoDEmanX, Flybynyt, SE2Dev, tupivere_, shiversoftdev",
-    "version": (0, 9, 5),
-    "blender": (4, 1, 0),
-    "location": "File > Import  |  File > Export",
-    "description": "Import/Export XModels and XAnims",
+    "author": "Ma_rv, CoDEmanX, Flybynyt, SE2Dev, shiversoftdev, tupivere_",
+    "version": (1, 0, 0),
+    "blender": (4, 0, 0),
+    "location": "File > Import/Export",
+    "description": "Import/Export Call of Duty XModels and XAnims",
     "wiki_url": "https://github.com/deshayu/BlenderCoD/wiki",
-    "tracker_url": "https://github.com/marv7000/BetterBlenderCOD/issues/",
-    "support": "COMMUNITY",
-    "category": "Import-Export"
+    "tracker_url": "https://github.com/marv7000/BetterBlenderCOD/issues",
+    "support": "COMMUNITY", 
+    "category": "Import-Export",
+    "warning": "",  # For Deprecations
 }
-
 
 def update_submenu_mode(self, context):
     try:
@@ -48,7 +57,6 @@ def update_submenu_mode(self, context):
     except:
         pass
     register()
-
 
 def update_scale_length(self, context):
     unit_map = {
@@ -110,39 +118,24 @@ class BlenderCoD_Preferences(AddonPreferences):
 
     def draw(self, context):
         layout = self.layout
+        
+        # Main toggle option
         row = layout.row()
         row.prop(self, "use_submenu")
-        # Scale Options
-        col = row.column(align=True)
-        col.label(text="Units:")
-        sub = col.split(align=True)
-        sub.prop(self, "unit_enum", text="")
-        sub = col.split(align=True)
-        sub.enabled = self.unit_enum == 'CUSTOM'
-        sub.prop(self, "scale_length")
-
-
-# To support reload properly, try to access a package var, if it's there,
-# reload everything
-if "bpy" in locals():
-    import imp
-    if "import_xmodel" in locals():
-        imp.reload(import_xmodel)
-    if "export_xmodel" in locals():
-        imp.reload(export_xmodel)
-    if "import_xanim" in locals():
-        imp.reload(import_xanim)
-    if "export_xanim" in locals():
-        imp.reload(export_xanim)
-    if "shared" in locals():
-        imp.reload(shared)
-    if "PyCoD" in locals():
-        imp.reload(PyCoD)
-
-else:
-    from . import import_xmodel, export_xmodel, import_xanim, export_xanim
-    from . import shared
-    from . import PyCoD
+        
+        # Units settings
+        box = layout.box()
+        box.label(text="Scale Options")
+        
+        col = box.column(align=True)
+        row = col.row(align=True)
+        row.label(text="Units:")
+        row.prop(self, "unit_enum", text="")
+        
+        # Only show custom scale option when custom units are selected
+        if self.unit_enum == 'CUSTOM':
+            row = col.row(align=True)
+            row.prop(self, "scale_length")
 
 
 class COD_MT_import_xmodel(bpy.types.Operator, ImportHelper):
@@ -224,22 +217,17 @@ class COD_MT_import_xmodel(bpy.types.Operator, ImportHelper):
     )
 
     def execute(self, context):
-        from . import import_xmodel
-        start_time = time.process_time()
+        from time import process_time
 
-        keywords = self.as_keywords(ignore=("filter_glob",
-                                            "check_existing",
-                                            "ui_tab"))
-
+        start_time = process_time()
+        keywords = self.as_keywords(ignore=("filter_glob", "check_existing", "ui_tab"))
         result = import_xmodel.load(self, context, **keywords)
 
-        if not result:
-            self.report({'INFO'}, "Import finished in %.4f sec." %
-                        (time.process_time() - start_time))
-            return {'FINISHED'}
-        else:
-            self.report({'ERROR'}, result)
-            return {'CANCELLED'}
+        status, msg, ret = ('INFO', f"Import finished in {process_time() - start_time:.4f} sec.", 'FINISHED') \
+            if not result else ('ERROR', result, 'CANCELLED')
+        
+        self.report({status}, msg)
+        return {ret}
 
     @classmethod
     def poll(self, context):
@@ -298,19 +286,6 @@ class COD_MT_import_xanim(bpy.types.Operator, ImportHelper):
         default=True,
     )
 
-    use_actions: BoolProperty(
-        name="Import as Action(s)",
-        description=("Import each animation as a separate action "
-                     "instead of appending to the current action"),
-        default=True
-    )
-
-    use_actions_skip_existing: BoolProperty(
-        name="Skip Existing Actions",
-        description="Skip animations that already have existing actions",
-        default=False
-    )
-
     use_notetracks: BoolProperty(
         name="Import Notetracks",
         description=("Import notes to scene timeline markers "
@@ -329,10 +304,10 @@ class COD_MT_import_xanim(bpy.types.Operator, ImportHelper):
         name="Scale FPS",
         description="Automatically convert all imported animation(s) to the specified framerate",   # nopep8
         items=(('DISABLED', "Disabled", "No framerate adjustments are applied"),   # nopep8
-               ('SCENE', "Scene", "Use the scene's framerate"),
+               ('ACTION', "Action", "Use the animation's framerate"),
                ('CUSTOM', "Custom", "Use custom framerate")
                ),
-        default='DISABLED',
+        default='ACTION',
     )
 
     fps_scale_target_fps: FloatProperty(
@@ -348,7 +323,7 @@ class COD_MT_import_xanim(bpy.types.Operator, ImportHelper):
         name="Update Scene FPS",
         description=("Set the scene framerate to match the framerate "
                      "found in the first imported animation"),
-        default=False
+        default=True
     )
 
     update_frame_range: BoolProperty(
@@ -358,30 +333,18 @@ class COD_MT_import_xanim(bpy.types.Operator, ImportHelper):
     default=True
     )
 
-    anim_offset: FloatProperty(
-        name="Animation Offset",
-        description="Offset to apply to animation during import, in frames",
-        default=1.0,
-    )
-
     def execute(self, context):
-        from . import import_xanim
-        start_time = time.process_time()
+        from time import process_time
 
-        ignored_properties = ("filter_glob", "files", "apply_unit_scale")
-        result = import_xanim.load(
-            self,
-            context,
-            self.apply_unit_scale,
-            **self.as_keywords(ignore=ignored_properties))
+        start_time = process_time()
+        result = import_xanim.load(self, context, self.apply_unit_scale, **self.as_keywords(ignore=("filter_glob", "files", "apply_unit_scale")))
 
-        if not result:
-            self.report({'INFO'}, "Import finished in %.4f sec." %
-                        (time.process_time() - start_time))
-            return {'FINISHED'}
-        else:
-            self.report({'ERROR'}, result)
-            return {'CANCELLED'}
+        elapsed = process_time() - start_time
+        status, msg, ret = ('INFO', f'Import finished in {elapsed:.4f} sec.', 'FINISHED') \
+            if not result else ('ERROR', result, 'CANCELLED')
+        
+        self.report({status}, msg)
+        return {ret}
 
     @classmethod
     def poll(self, context):
@@ -390,33 +353,35 @@ class COD_MT_import_xanim(bpy.types.Operator, ImportHelper):
     def draw(self, context):
         layout = self.layout
 
-        row = layout.row(align=True)
-        row.prop(self, "global_scale")
-        sub = row.row(align=True)
-        sub.prop(self, "apply_unit_scale", text="")
+        # ===== Scale Options =====
+        scale_row = layout.row(align=True)
+        scale_row.prop(self, "global_scale")
+        unit_scale_sub = scale_row.row(align=True)
+        unit_scale_sub.prop(self, "apply_unit_scale", text="Apply Unit Scale", icon='SNAP_INCREMENT' if self.apply_unit_scale else 'SNAP_GRID')
 
-        layout.prop(self, 'use_actions')
-        sub = layout.split()
-        sub.enabled = self.use_actions
-        sub.prop(self, 'use_actions_skip_existing')
-        layout.prop(self, 'use_notetracks')
-        sub = layout.split()
-        sub.enabled = self.use_notetracks
-        sub.prop(self, 'use_notetrack_file')
+        # ===== Notetracks Settings =====
+        box = layout.box()
+        box.label(text="Notetrack Settings", icon='MARKER_HLT')
+        row = box.row()
+        row.prop(self, 'use_notetracks', text="Import Notetracks")
+        row = box.row()
+        row.enabled = self.use_notetracks
+        row.prop(self, 'use_notetrack_file', text="Load From .NT_EXPORT")
 
-        sub = layout.box()
-        split = sub.split(factor=0.55)
-        split.label(text="Scale FPS:")
-        split.prop(self, 'fps_scale_type', text="")
-        if self.fps_scale_type == 'DISABLED':
-            sub.prop(self, "update_scene_fps")
-        elif self.fps_scale_type == 'SCENE':
-            sub.label(text="Target Framerate: %.2f" % context.scene.render.fps)
-        elif self.fps_scale_type == 'CUSTOM':
-            sub.prop(self, 'fps_scale_target_fps')
-        sub.prop(self, "update_frame_range")
-        layout.prop(self, 'anim_offset')
+        # ===== Framerate Settings =====
+        box = layout.box()
+        box.label(text="Frame Rate Settings", icon='RENDER_ANIMATION')
+        
+        row = box.row()
+        row.label(text="Framerate:")
+        row.prop(self, 'fps_scale_type', expand=True)
+        
+        if self.fps_scale_type == 'CUSTOM':
+            box.prop(self, 'fps_scale_target_fps', text="Custom Target FPS")
 
+        box = layout.box()
+        box.label(text="Frame Range", icon='PREVIEW_RANGE')
+        box.prop(self, "update_frame_range", text="Update Timeline Range")
 
 class COD_MT_export_xmodel(bpy.types.Operator, ExportHelper):
     bl_idname = "export_scene.xmodel"
@@ -534,29 +499,6 @@ class COD_MT_export_xmodel(bpy.types.Operator, ExportHelper):
         default=True
     )
 
-    """
-    use_armature_pose : BoolProperty(
-        name="Pose animation to models",
-        description=("Export meshes with Armature modifier applied "
-                     "as a series of XMODEL_EXPORT files"),
-        default=False
-    )
-
-    frame_start : IntProperty(
-        name="Start",
-        description="First frame to export",
-        default=1,
-        min=0
-    )
-
-    frame_end : IntProperty(
-        name="End",
-        description="Last frame to export",
-        default=250,
-        min=0
-    )
-    """
-
     use_weight_min: BoolProperty(
         name="Minimum Bone Weight",
         description=("Try this if you get 'too small weight' "
@@ -574,70 +516,40 @@ class COD_MT_export_xmodel(bpy.types.Operator, ExportHelper):
     )
 
     def execute(self, context):
-        from . import export_xmodel
-        start_time = time.process_time()
+        from time import process_time
 
-        ignore = ("filter_glob", "check_existing")
-        result = export_xmodel.save(self, context,
-                                    **self.as_keywords(ignore=ignore))
+        start_time = process_time()
+        result = export_xmodel.save(self, context, **self.as_keywords(ignore=("filter_glob", "check_existing")))
 
-        if not result:
-            self.report({'INFO'}, "Export finished in %.4f sec." %
-                        (time.process_time() - start_time))
-            return {'FINISHED'}
-        else:
-            self.report({'ERROR'}, result)
-            return {'CANCELLED'}
+        status, msg, ret = ('INFO', f"Export finished in {process_time() - start_time:.4f} sec.", 'FINISHED') \
+            if not result else ('ERROR', result, 'CANCELLED')
+        
+        self.report({status}, msg)
+        return {ret}
 
     @classmethod
     def poll(self, context):
         return (context.scene is not None)
 
     def check(self, context):
-        '''
-        This is a modified version of the ExportHelper check() method
-        This one provides automatic checking for the file extension
-         based on what 'target_format' is (through 'format_ext_map')
-        '''
-        import os
         from bpy_extras.io_utils import _check_axis_conversion
+
         change_ext = False
         change_axis = _check_axis_conversion(self)
 
-        check_extension = self.check_extension
-
-        if check_extension is not None:
+        if self.check_extension is not None:
             filepath = self.filepath
-            if os.path.basename(filepath):
-                # If the current extension is one of the valid extensions
-                #  (as defined by this class), strip the extension, and ensure
-                #  that it has the correct one
-                # (needed when switching extensions)
-                base, ext = os.path.splitext(filepath)
-                if ext[1:] in self.format_ext_map:
-                    filepath = base
-                target_ext = self.format_ext_map[self.target_format]
-                filepath = bpy.path.ensure_ext(filepath,
-                                               target_ext
-                                               if check_extension
-                                               else "")
+            base, ext = os.path.splitext(filepath)
 
-                if filepath != self.filepath:
-                    self.filepath = filepath
+            if os.path.basename(filepath) and ext[1:] in self.format_ext_map:
+                target_ext = self.format_ext_map[self.target_format]
+                new_filepath = bpy.path.ensure_ext(base, target_ext if self.check_extension else "")
+                
+                if new_filepath != filepath:
+                    self.filepath = new_filepath
                     change_ext = True
 
-        return (change_ext or change_axis)
-
-    # Extend ExportHelper invoke function to support dynamic default values
-    def invoke(self, context, event):
-
-        # self.use_frame_start = context.scene.frame_start
-        self.use_frame_start = context.scene.frame_current
-
-        # self.use_frame_end = context.scene.frame_end
-        self.use_frame_end = context.scene.frame_current
-
-        return super().invoke(context, event)
+        return change_ext or change_axis
 
     def draw(self, context):
         layout = self.layout
@@ -773,21 +685,6 @@ class COD_MT_export_xanim(bpy.types.Operator, ExportHelper):
         default='ACTION'
     )
 
-    use_notetrack_format: EnumProperty(
-        name="Notetrack format",
-        description=("Notetrack format to use. "
-                     "Always set 'CoD 7' for Black Ops, "
-                     "even if not using notetrack!"),
-        items=(('5', "CoD 5",
-                "Separate NT_EXPORT notetrack file for 'World at War'"),
-               ('7', "CoD 7",
-                "Separate NT_EXPORT notetrack file for 'Black Ops'"),
-               ('1', "all other",
-                "Inline notetrack data for all CoD versions except WaW and BO")
-               ),
-        default='1'
-    )
-
     use_notetrack_file: BoolProperty(
         name="Write NT_EXPORT",
         description=("Create an NT_EXPORT file for "
@@ -834,143 +731,141 @@ class COD_MT_export_xanim(bpy.types.Operator, ExportHelper):
         max=1000
     )
 
-    def execute(self, context):
-        from . import export_xanim
-        start_time = time.process_time()
-        result = export_xanim.save(
-            self,
-            context,
-            **self.as_keywords(ignore=("filter_glob", "check_existing")))
+    write_tag_align: BoolProperty(
+        name="Write TAG_ALIGN",
+        description=("Check this if you want to export TAG_ALIGN with the animation, required for some animations (Not needed for Viewmodel Animations)"),
+        default=False
+    )
 
-        if not result:
-            msg = "Export finished in %.4f sec." % (time.process_time() - start_time)
-            self.report({'INFO'}, msg)
-            return {'FINISHED'}
-        else:
-            self.report({'ERROR'}, result)
-            return {'CANCELLED'}
+    def execute(self, context):
+        from time import process_time
+
+        start_time = process_time()
+        result = export_xanim.save(self, context, **self.as_keywords(ignore=("filter_glob", "check_existing")))
+
+        status, msg, ret = ('INFO', f"Export finished in {process_time() - start_time:.4f} sec.", 'FINISHED') \
+            if not result else ('ERROR', result, 'CANCELLED')
+        
+        self.report({status}, msg)
+        return {ret}
 
     @classmethod
     def poll(self, context):
         return (context.scene is not None)
 
     def check(self, context):
-        '''
-        This is a modified version of the ExportHelper check() method
-        This one provides automatic checking for the file extension
-         based on what 'target_format' is (through 'format_ext_map')
-        '''
-        import os
         from bpy_extras.io_utils import _check_axis_conversion
+
         change_ext = False
         change_axis = _check_axis_conversion(self)
 
-        check_extension = self.check_extension
-
-        if check_extension is not None:
+        if self.check_extension is not None:
             filepath = self.filepath
-            if os.path.basename(filepath):
-                # If the current extension is one of the valid extensions
-                #  (as defined by this class), strip the extension, and ensure
-                #  that it has the correct one
-                # (needed when switching extensions)
-                base, ext = os.path.splitext(filepath)
-                if ext[1:] in self.format_ext_map:
-                    filepath = base
-                target_ext = self.format_ext_map[self.target_format]
-                filepath = bpy.path.ensure_ext(filepath,
-                                               target_ext
-                                               if check_extension
-                                               else "")
+            base, ext = os.path.splitext(filepath)
 
-                if filepath != self.filepath:
-                    self.filepath = filepath
+            if os.path.basename(filepath) and ext[1:] in self.format_ext_map:
+                target_ext = self.format_ext_map[self.target_format]
+                new_filepath = bpy.path.ensure_ext(base, target_ext if self.check_extension else "")
+                
+                if new_filepath != filepath:
+                    self.filepath = new_filepath
                     change_ext = True
 
-        return (change_ext or change_axis)
-
-    '''
-    # Extend ExportHelper invoke function to support dynamic default values
-    def invoke(self, context, event):
-
-        self.use_frame_start = context.scene.frame_start
-        self.use_frame_end = context.scene.frame_end
-        # self.use_framerate = round(
-        #     context.scene.render.fps / context.scene.render.fps_base)
-
-        return super().invoke(context, event)
-    '''
+        return change_ext or change_axis
 
     def draw(self, context):
         layout = self.layout
+
+        # ===== Export Format & Selection =====
         layout.prop(self, 'target_format', expand=True)
-        layout.prop(self, 'use_selection')
+        layout.prop(self, 'use_selection', text="Export Selected Bones Only")
 
-        row = layout.row(align=True)
-        row.prop(self, "global_scale")
-        sub = row.row(align=True)
-        sub.prop(self, "apply_unit_scale", text="")
+        # ===== Scale Options =====
+        scale_row = layout.row(align=True)
+        scale_row.prop(self, "global_scale")
+        unit_scale_sub = scale_row.row(align=True)
+        unit_scale_sub.prop(self, "apply_unit_scale", text="Apply Unit Scale", icon='SNAP_INCREMENT' if self.apply_unit_scale else 'SNAP_GRID')
 
+        # ===== Action Export Options =====
         action_count = len(bpy.data.actions)
+        action_row = layout.row()
+        action_row.enabled = action_count > 0
+        action_row.prop(
+            self, 
+            'use_all_actions',
+            text=f'Export All Actions ({action_count} action{"s" if action_count != 1 else ""})'
+        )
 
-        sub = layout.split()
-        sub.enabled = action_count > 0
-        sub.prop(self, 'use_all_actions',
-                 text='Export All Actions (%d actions)' % action_count)
-
-        # Filename Options
         if self.use_all_actions and action_count > 0:
-            sub = layout.column(align=True)
-            sub.label(text="Filename Options:")
-            box = sub.box()
-            sub = box.column(align=True)
-
-            sub.prop(self, 'filename_format')
-
-            ex_num = action_count - 1
-            ex_action = bpy.data.actions[ex_num].name
-            ex_base = os.path.splitext(os.path.basename(self.filepath))[0]
-
+            box = layout.box()
+            box.prop(self, 'filename_format', text="Pattern (use {name}, {base}, {idx})")
+            
             try:
-                icon = 'NONE'
-                from . import export_xanim
-                template = export_xanim.CustomTemplate(self.filename_format)
-                example = template.format(ex_action, ex_base, ex_num)
-            except Exception as err:
-                icon = 'ERROR'
-                example = str(err)
+                action = bpy.data.actions[-1]
+                example = self.filename_format.format(
+                    name=action.name,
+                    base=os.path.splitext(os.path.basename(self.filepath))[0],
+                    idx=action_count-1
+                )
+                box.label(text=f"Example: {example}", icon='INFO')
+            except KeyError:
+                box.label(text="Error: Use only {name}, {base}, {idx}", icon='ERROR')
+            except Exception:
+                box.label(text="Invalid format", icon='ERROR')
 
-            sub.label(text=example, icon=icon)
+        # ===== Notetrack Options =====
+        notetrack_box = layout.box()
+        notetrack_box.label(text="Notetracks", icon='MARKER_HLT')
+        notetrack_box.prop(self, 'use_notetracks', text="Export Notetracks")
 
-        # Notetracks
-        col = layout.column(align=True)
-        sub = col.row()
-        sub = sub.split(factor=0.45)
-        sub.prop(self, 'use_notetracks', text="Use Notetrack")
-        sub.row().prop(self, 'use_notetrack_mode', expand=True)
-        sub = col.column()
-        sub.enabled = self.use_notetrack_mode != 'NONE'
+        if self.use_notetracks:
+            notetrack_box.row().prop(self, 'use_notetrack_mode', expand=True)
+            
+            if self.use_notetrack_mode != 'NONE':
+                notetrack_box.prop(
+                    self, 
+                    'use_notetrack_file',
+                    text="Export to .NT_EXPORT",
+                    icon='FILE_TEXT' if self.use_notetrack_file else 'DOT'
+                )
 
-        sub = sub.split()
-        sub.enabled = self.use_notetracks
-        sub.prop(self, 'use_notetrack_file')
+        # ===== Framerate Settings =====
+        framerate_box = layout.box()
+        framerate_box.label(text="Framerate Settings", icon='TIME')
+        
+        row = framerate_box.row()
+        row.prop(
+            self, 
+            'use_custom_framerate',
+            text="Override Scene Framerate",
+            toggle=True
+        )
+        
+        if self.use_custom_framerate:
+            row = framerate_box.row()
+            row.prop(self, 'use_framerate', text="Framerate")
+            if self.use_framerate <= 0:
+                row.alert = True
+                framerate_box.label(text="Invalid framerate (must be > 0)", icon='ERROR')
 
-        # Framerate
-        layout.prop(self, 'use_custom_framerate')
-        sub = layout.split()
-        sub.enabled = self.use_custom_framerate
-        sub.prop(self, 'use_framerate')
+        # ===== Frame Range =====
+        frame_box = layout.box()
+        frame_box.label(text="Frame Range", icon='ARROW_LEFTRIGHT')
+        
+        row = frame_box.row()
+        row.prop(self, 'use_frame_range_mode', expand=True)
+        
+        if self.use_frame_range_mode == 'CUSTOM':
+            row = frame_box.row(align=True)
+            row.prop(self, 'frame_start', text="Start")  # Use frame_start_custom here
+            row.prop(self, 'frame_end', text="End")  # Use frame_end_custom here
+            
+            # Validation
+            if self.frame_start > self.frame_end:
+                frame_box.label(text="Warning: Start frame > End frame", icon='ERROR')
 
-        # Frame Range
-        sub = layout.row()
-        sub.label(text="Frame Range:")
-        sub.prop(self, 'use_frame_range_mode', text="")
-
-        sub = layout.row(align=True)
-        sub.enabled = self.use_frame_range_mode == 'CUSTOM'
-        sub.prop(self, 'frame_start')
-        sub.prop(self, 'frame_end')
-
+        # ===== Write TAG_ALIGN =====
+        layout.prop(self, 'write_tag_align', text="Write TAG_ALIGN", icon='ALIGN_CENTER', toggle=True)
 
 class COD_MT_import_submenu(bpy.types.Menu):
     bl_idname = "COD_MT_import_submenu"
@@ -1017,12 +912,6 @@ def menu_func_import_submenu(self, context):
 def menu_func_export_submenu(self, context):
     self.layout.menu(COD_MT_export_submenu.bl_idname, text="Call of Duty")
 
-
-'''
-    CLASS REGISTRATION
-    SEE https://wiki.blender.org/wiki/Reference/Release_Notes/2.80/Python_API/Addons
-'''
-
 classes = (
     BlenderCoD_Preferences,
     COD_MT_import_xmodel,
@@ -1033,16 +922,14 @@ classes = (
     COD_MT_export_submenu
 )
 
-
 def register():
     for cls in classes:
         bpy.utils.register_class(cls)
 
-    # __name__ is the same as the package name (io_scene_cod)
+    # Get preferences from the addon (same as package name 'io_scene_cod')
     preferences = bpy.context.preferences.addons[__name__].preferences
 
-    # Each of these appended functions is executed every time the
-    # corresponding menu list is shown
+    # Add menu functions to file import/export depending on preferences
     if not preferences.use_submenu:
         bpy.types.TOPBAR_MT_file_import.append(menu_func_xmodel_import)
         bpy.types.TOPBAR_MT_file_import.append(menu_func_xanim_import)
@@ -1052,25 +939,28 @@ def register():
         bpy.types.TOPBAR_MT_file_import.append(menu_func_import_submenu)
         bpy.types.TOPBAR_MT_file_export.append(menu_func_export_submenu)
 
-    # Set the global 'plugin_preferences' variable for each module
-    from . import shared as shared
+    # Set the global 'plugin_preferences' variable for use across the module
     shared.plugin_preferences = preferences
 
 
 def unregister():
     # You have to try to unregister both types of the menus here because
     # the preferences will have already been changed by the time this func runs
-    bpy.types.TOPBAR_MT_file_import.remove(menu_func_xmodel_import)
-    bpy.types.TOPBAR_MT_file_import.remove(menu_func_xanim_import)
-    bpy.types.TOPBAR_MT_file_export.remove(menu_func_xmodel_export)
-    bpy.types.TOPBAR_MT_file_export.remove(menu_func_xanim_export)
+    if not bpy.context.preferences.addons[__name__].preferences.use_submenu:
+        try:
+            bpy.types.TOPBAR_MT_file_import.remove(menu_func_xmodel_import)
+            bpy.types.TOPBAR_MT_file_import.remove(menu_func_xanim_import)
+            bpy.types.TOPBAR_MT_file_export.remove(menu_func_xmodel_export)
+            bpy.types.TOPBAR_MT_file_export.remove(menu_func_xanim_export)
+        except ValueError:
+            pass  # Handle the case where the menu item wasn't added
 
-    bpy.types.TOPBAR_MT_file_import.remove(menu_func_import_submenu)
-    bpy.types.TOPBAR_MT_file_export.remove(menu_func_export_submenu)
+    else:
+        try:
+            bpy.types.TOPBAR_MT_file_import.remove(menu_func_import_submenu)
+            bpy.types.TOPBAR_MT_file_export.remove(menu_func_export_submenu)
+        except ValueError:
+            pass  # Handle the case where the menu item wasn't added
 
     for cls in classes:
         bpy.utils.unregister_class(cls)
-
-
-if __name__ == "__main__":
-    register()
