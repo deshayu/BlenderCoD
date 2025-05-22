@@ -80,168 +80,79 @@ def load(self, context,
 
     scene = bpy.context.scene
     view_layer = bpy.context.view_layer
-
-    # Check if there are any objects in the scene
-    if bpy.context.scene.objects:
-        # Set the first object in the scene as the active object
-        bpy.context.view_layer.objects.active = bpy.context.scene.objects[0]
-    else:
-        # If there are no objects in the scene, create a new empty object and set it as active
-        bpy.ops.object.empty_add()
-        bpy.context.view_layer.objects.active = bpy.context.active_object
-        empty_object = bpy.context.active_object
-
-    # Check if an active object is set
-    if bpy.context.view_layer.objects.active:
-        # Why didn't it check for hidden objects????
-        if bpy.context.view_layer.objects.active.hide_get():
-            # Find a visible object
-            for obj in bpy.context.view_layer.objects:
-                if not obj.hide_get() or not obj.visible_get():
-                    bpy.context.view_layer.objects.active = obj
-                    break
-        # Switch to object mode
-        bpy.ops.object.mode_set(mode='OBJECT')
-    else:
-        print("No active object selected or created. Please ensure there are objects in the scene.")
         
     # Load the model
-    model_name = os.path.basename(filepath)
-    model = XModel.Model(('.').join(model_name.split('.')[:-1]))
+    model_name = os.path.splitext(os.path.basename(filepath))[0]
+    model = XModel.Model(model_name)
 
-    ext = os.path.splitext(filepath)[-1].upper()
-    if ext == '.XMODEL_BIN':
-        LoadModelFile = model.LoadFile_Bin
-    else:
-        LoadModelFile = model.LoadFile_Raw
-
+    ext = os.path.splitext(filepath)[1].upper()
+    LoadModelFile = model.LoadFile_Bin if ext == '.XMODEL_BIN' else model.LoadFile_Raw
     LoadModelFile(filepath, split_meshes=split_meshes)
 
     # Materials
-    # List of the materials that Blender has loaded
     materials = []
-    # Map of images to their instances in Blender
-    #  (or None if they failed to load)
-    material_images = {}
 
     for material in model.materials:
-        mat = bpy.data.materials.get(material.name)
-        if mat is None:
-            print("Adding material '%s'" % material.name)
-            mat = bpy.data.materials.new(name=material.name)
-
-            # mat.diffuse_shader = 'LAMBERT'
-            # mat.specular_shader = 'PHONG'
-
-            # Load the textures for this material - TODO: Cycles Support
-            if load_images:
-                # Load the actual image files
-                # Color maps get deferred to after the other textures
-                deferred_textures = []
-                for image_type, image_name in material.images.items():
-                    if image_name not in material_images:
-                        search_dir = os.path.dirname(filepath)
-                        image = load_image(image_name,
-                                           dirname=search_dir,
-                                           recursive=use_image_search,
-                                           check_existing=True)
-                        if image is None:
-                            print("Failed to load image: '%s'" % image_name)
-                            # Create a placeholder image for the one that
-                            # failed to load
-                            image = load_image(image_name,
-                                               dirname=None,
-                                               recursive=False,
-                                               check_existing=True,
-                                               place_holder=True)
-                        material_images[image_name] = image
-                    elif image_name in bpy.data.images:
-                        image = bpy.data.images[image_name]
-                    else:
-                        image = material_images[image_name]
-        else:
-            if mat not in materials:
-                print("Material '%s' already exists!" % material.name)
+        mat = bpy.data.materials.get(material.name) or bpy.data.materials.new(name=material.name)
         materials.append(mat)
 
     # Meshes
-    mesh_objs = []  # Mesh objects that we're going to link the skeleton to
+    mesh_objs = []
+
     for sub_mesh in model.meshes:
-        if split_meshes is False:
-            sub_mesh.name = "%s_mesh" % model.name
-        print("Creating mesh: '%s'" % sub_mesh.name)
+        sub_mesh.name = f"{model.name}_mesh" if not split_meshes else sub_mesh.name
         mesh = bpy.data.meshes.new(sub_mesh.name)
         bm = bmesh.new()
 
-        # Add UV Layers
+        # Create layers
         uv_layer = bm.loops.layers.uv.new("UVMap")
-
-        # Add Vertex Color Layer
-        if use_vertex_colors:
-            vert_color_layer = bm.loops.layers.color.new("Color")
+        vert_color_layer = bm.loops.layers.color.new("Color") if use_vertex_colors else None
 
         # Add Verts
         for vert in sub_mesh.verts:
             bm.verts.new(Vector(vert.offset) * target_scale)
         bm.verts.ensure_lookup_table()
 
-        # Contains data for faces that use the same 3 verts as an existing face
-        #  (usually caused by `double sided` tris)
-        dup_faces = []
-        dup_verts = []
-
-        # Contains vertex mapping data for all verts that the dup faces use
+        # Lists
+        dup_faces, dup_verts, used_faces, loop_normals = [], [], [], []
         dup_verts_mapping = [None] * len(sub_mesh.verts)
-        used_faces = []
-        loop_normals = []
-
-        # Tracks how many faces in the current mesh use a given material
         material_usage_counts = [0] * len(materials)
-
-        # Inner function used set up a bmesh tri's normals (into loop_normals),
-        #  uv, materials, etc.
+        
+        # Inner function used set up a bmesh tri's: normals, UVs, material, vertex colors
         def setup_tri(f):
-            # Assign the face's material & increment the material usage counter
             material_index = face.material_id
             f.material_index = material_index
-
             material_usage_counts[material_index] += 1
 
-            # Assign the face's UV layer
-            for loop_index, loop in enumerate(f.loops):
-                face_index_loop = face.indices[loop_index]
-                # Normal
-                loop_normals.append(face_index_loop.normal)
-                # UV Coordinate Correction
-                uv = Vector(face_index_loop.uv)
-                uv.y = 1.0 - uv.y
-                loop[uv_layer].uv = uv
-                # Vertex Colors
+            for i, loop in enumerate(f.loops):
+                v = face.indices[i]
+                loop_normals.append(v.normal)
+
+                # Flip UV Y-coordinate
+                loop[uv_layer].uv = Vector((v.uv[0], 1.0 - v.uv[1]))
+
                 if use_vertex_colors:
-                    loop[vert_color_layer] = face_index_loop.color
+                    loop[vert_color_layer] = v.color
 
             used_faces.append(face)
 
         unused_faces = []
 
         vert_count = len(sub_mesh.verts)
+
         for face_index, face in enumerate(sub_mesh.faces):
-            # Fix the winding order
-            tmp = face.indices[2]
-            face.indices[2] = face.indices[1]
-            face.indices[1] = tmp
+            # Fix winding order by swapping indices 1 and 2
+            face.indices[1], face.indices[2] = face.indices[2], face.indices[1]
 
             indices = [bm.verts[index.vertex] for index in face.indices]
 
             try:
                 f = bm.faces.new(indices)
             except ValueError:
-                # Mark the face as unused
                 unused_faces.append(face)
 
                 if not face.isValid():
-                    print("TRI %d is invalid! %s" %
-                          (face_index, [index.vertex for index in face.indices]))
+                    print(f"TRI {face_index} is invalid! {[index.vertex for index in face.indices]}")
                     continue
 
                 for index in face.indices:
@@ -250,6 +161,7 @@ def load(self, context,
                         dup_verts_mapping[vert] = len(dup_verts) + vert_count
                         dup_verts.append(sub_mesh.verts[vert])
                     index.vertex = dup_verts_mapping[vert]
+
                 dup_faces.append(face)
             else:
                 setup_tri(f)
@@ -259,16 +171,18 @@ def load(self, context,
             sub_mesh.faces.remove(face)
 
         if use_dup_tris:
+            # Add duplicate verts
             for vert in dup_verts:
                 bm.verts.new(Vector(vert.offset) * target_scale)
             bm.verts.ensure_lookup_table()
 
+            # Add duplicate faces
             for face in dup_faces:
                 indices = [bm.verts[index.vertex] for index in face.indices]
                 try:
                     f = bm.faces.new(indices)
                 except ValueError:
-                    pass  # Skip dups of dups
+                    pass  # skip duplicates of duplicates
                 else:
                     setup_tri(f)
 
@@ -304,44 +218,37 @@ def load(self, context,
                 material_index += 1
             material_usage_index += 1
 
-        # Custom Normals
         if use_custom_normals:
-            
-            if bpy.app.version < (4, 1, 0):
-                mesh.calc_normals_split()
+            if bpy.app.version >= (4, 1, 0): #~ Use old method on versions older than 4.1+
+                mesh.normals_split_custom_set(loop_normals)
             else:
-                calculate_split_normals(mesh)
+                mesh.create_normals_split()
 
-            # *Very* important to not remove loop normals here!
             mesh.validate(clean_customdata=False)
-
-            # mesh.free_normals_split() # Is this necessary?
 
             clnors = array.array('f', [0.0] * (len(mesh.loops) * 3))
             mesh.loops.foreach_get("normal", clnors)
 
-            # Enable Smoothing - must be BEFORE normals_split_custom_set, etc.
             polygon_count = len(mesh.polygons)
             mesh.polygons.foreach_set("use_smooth", [True] * polygon_count)
 
             mesh.normals_split_custom_set(tuple(zip(*(iter(clnors),) * 3)))
+
+            if bpy.app.version < (4, 1, 0):
+                mesh.use_auto_smooth = True
+
         else:
             mesh.validate()
 
-            # Enable Smoothing
             polygon_count = len(mesh.polygons)
             mesh.polygons.foreach_set("use_smooth", [True] * polygon_count)
-
-            # Use Auto-generated Normals
-            if bpy.app.version < (4, 1, 0):
-                mesh.calc_normals()
+            if bpy.app.version >= (4, 1, 0):
+                mesh.update() 
             else:
-                calculate_face_normals(mesh)
+                mesh.calc_normals() 
 
-        if split_meshes:
-            obj_name = "%s_%s" % (model.name, mesh.name)
-        else:
-            obj_name = model.name
+        # Determine object name
+        obj_name = f"{model.name}_{mesh.name}" if split_meshes else model.name
 
         # Create the model object and link it to the scene
         obj = bpy.data.objects.new(obj_name, mesh)
@@ -366,19 +273,18 @@ def load(self, context,
                         material_image_map[index] = bpy.data.images[color_map]
 
     if use_armature:
-        # Create the skeleton
-        armature = bpy.data.armatures.new("%s_amt" % model.name)
+        armature = bpy.data.armatures.new(f"{model.name}_amt")
         armature.display_type = "STICK"
 
-        skel_obj = bpy.data.objects.new("%s_skel" % model.name, armature)
+        skel_obj = bpy.data.objects.new(f"{model.name}_skel", armature)
         skel_obj.show_in_front = True
 
-        # Add the skeleton object to the scene
+        # Link to scene and set active
         scene.collection.objects.link(skel_obj)
         view_layer.objects.active = skel_obj
-
         bpy.ops.object.mode_set(mode='EDIT')
 
+        # Create bones
         for bone in model.bones:
             edit_bone = armature.edit_bones.new(bone.name.lower())
             edit_bone.use_local_location = False
@@ -391,83 +297,16 @@ def load(self, context,
             edit_bone.tail = offset + axis
             edit_bone.align_roll(roll)
 
-            if bone.parent != -1:
-                parent = armature.edit_bones[bone.parent]
-                if self.use_parents is True:
-                    edit_bone.parent = parent
+            if bone.parent != -1 and self.use_parents:
+                edit_bone.parent = armature.edit_bones[bone.parent]
 
         # HACK: Force the pose bone list for the armature to be rebuilt
         bpy.ops.object.mode_set(mode='OBJECT')
 
-        # Add the armature modifier to each mesh object
+        # Add armature modifier to meshes
         for mesh_obj in mesh_objs:
             mesh_obj.parent = skel_obj
-            modifier = mesh_obj.modifiers.new('Armature Rig', 'ARMATURE')
-            modifier.object = skel_obj
-            modifier.use_bone_envelopes = False
-            modifier.use_vertex_groups = True
-
-    # Delete the empty object
-    if 'empty_object' in locals():
-        bpy.data.objects.remove(empty_object, do_unlink=True)
-    # view_layer.update()
-
-def manual_calc_normal(face):
-    """ Manually calculate the normal for a face """
-    verts = face.verts
-    if len(verts) < 3:
-        return Vector((0.0, 0.0, 0.0))
-    
-    v0, v1, v2 = verts[:3]
-    edge1 = v1.co - v0.co
-    edge2 = v2.co - v0.co
-    normal = edge1.cross(edge2).normalized()
-    return normal
-
-def calculate_face_normals(bm):
-    """ Calculate the normal for each face """
-    for face in bm.faces:
-        face.normal = manual_calc_normal(face)
-
-def calculate_split_normals(mesh):
-    # Ensure we are in object mode
-    bpy.ops.object.mode_set(mode='OBJECT')
-
-    # Create a BMesh object from the mesh data
-    bm = bmesh.new()
-    bm.from_mesh(mesh)
-    
-    # Calculate face normals
-    calculate_face_normals(bm)
-
-    # Prepare a list to store calculated loop normals
-    loop_normals = []
-
-    # Calculate split normals
-    for face in bm.faces:
-        face_normal = face.normal
-        for loop in face.loops:
-            vertex = loop.vert
-            edge = loop.edge
-
-            if edge.smooth:
-                normal_sum = Vector((0.0, 0.0, 0.0))
-                linked_faces_count = 0
-                for linked_face in vertex.link_faces:
-                    normal_sum += linked_face.normal
-                    linked_faces_count += 1
-                if linked_faces_count > 0:
-                    loop_normal = (normal_sum / linked_faces_count).normalized()
-            else:
-                loop_normal = face_normal
-
-            loop_normals.append(loop_normal)
-
-    # Assign calculated normals to the mesh
-    mesh.normals_split_custom_set(loop_normals)
-    
-    # Update the mesh to apply changes
-    mesh.update()
-    
-    # Free BMesh
-    bm.free()
+            mod = mesh_obj.modifiers.new('Armature Rig', 'ARMATURE')
+            mod.object = skel_obj
+            mod.use_bone_envelopes = False
+            mod.use_vertex_groups = True

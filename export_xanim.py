@@ -19,6 +19,7 @@
 # <pep8 compliant>
 import os
 import bpy
+import string
 
 from . import shared
 from string import Template
@@ -91,6 +92,7 @@ def save(self, context,
     for index, action in enumerate(actions):
         # Setup action-specific file path
         if use_all_actions:
+            filename_template = string.Template("${action}")
             filename = filename_template.substitute(action=action.name, base=base_name, number=index)
             action_filepath = f"{path}{filename}.{target_format_lower}"
             ob.animation_data.action = action

@@ -796,23 +796,6 @@ class COD_MT_export_xanim(bpy.types.Operator, ExportHelper):
             text=f'Export All Actions ({action_count} action{"s" if action_count != 1 else ""})'
         )
 
-        if self.use_all_actions and action_count > 0:
-            box = layout.box()
-            box.prop(self, 'filename_format', text="Pattern (use {name}, {base}, {idx})")
-            
-            try:
-                action = bpy.data.actions[-1]
-                example = self.filename_format.format(
-                    name=action.name,
-                    base=os.path.splitext(os.path.basename(self.filepath))[0],
-                    idx=action_count-1
-                )
-                box.label(text=f"Example: {example}", icon='INFO')
-            except KeyError:
-                box.label(text="Error: Use only {name}, {base}, {idx}", icon='ERROR')
-            except Exception:
-                box.label(text="Invalid format", icon='ERROR')
-
         # ===== Notetrack Options =====
         notetrack_box = layout.box()
         notetrack_box.label(text="Notetracks", icon='MARKER_HLT')
