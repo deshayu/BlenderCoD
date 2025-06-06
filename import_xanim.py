@@ -18,8 +18,7 @@
 
 # <pep8 compliant>
 
-import os
-import bpy
+import os, bpy
 
 from . import shared as shared
 from .PyCoD import xanim as XAnim
@@ -29,89 +28,92 @@ def find_active_armature(context):
     obj = context.active_object
     return obj.find_armature() if obj and obj.type != 'ARMATURE' else obj
 
-def load(self, context, apply_unit_scale=False, **keywords):
-    if not (armature := find_active_armature(context)):
+def load(self, context, **kwargs):
+    
+    # Can't import anim without an armature
+    armature = find_active_armature(context)
+    if not armature:
         return "No active armature found"
-    
-    keywords['use_notetrack_file'] = keywords.pop('use_notetracks', True)
-    apply_unit_scale and keywords.update(global_scale=keywords.get('global_scale', 1.0) * shared.calculate_unit_scale_factor(context.scene))
-    
-    path = os.path.dirname(keywords['filepath'])
-    for f in self.files:
-        load_anim(self, context, armature, **{**keywords, 'filepath': os.path.join(path, f.name)})
 
-def load_anim(self, context, armature, filepath, global_scale=1.0, use_notetracks=True, 
-             use_notetrack_file=True, fps_scale_type='ACTION', fps_scale_target_fps=30, 
-             update_frame_range=True, update_scene_fps=True):
+    # Precompute stuff
+    global_scale =  kwargs.get('global_scale', 1.0)
+    use_notetrack_file = kwargs.get('use_notetrack_file', False)
+    update_frame_range = kwargs.get('update_frame_range', True)
+    update_scene_fps = kwargs.get('update_scene_fps', True)
+    fps_scale_target_fps = kwargs.get('fps_scale_target_fps', 30)
+    fps_scale_type = kwargs.get('fps_scale_type', 'ACTION')
+    fps_scale = 1.0
 
-    anim = XAnim.Anim()
-    ext = os.path.splitext(filepath)[-1].upper()
-    anim.LoadFile_Bin(filepath) if ext == '.XANIM_BIN' else anim.LoadFile_Raw(filepath, use_notetrack_file)
+    if kwargs.get('apply_unit_scale', True):
+        global_scale = shared.apply_inch_to_cm_scale(kwargs.get('global_scale', 1.0))
 
+    path = os.path.dirname(kwargs['filepath'])
     scene = context.scene
-    ob = armature
 
-    # Create action using the filename (without extension)
-    action = bpy.data.actions.new(os.path.basename(filepath).rsplit('.', 1)[0])
-    ob.animation_data_create().action = action
-    ob.animation_data.action.use_fake_user = True
-
-    # What the variable says
-    if update_scene_fps:
-        scene.render.fps = int(anim.framerate)
+    for f in self.files:
+        filepath = os.path.join(path, f.name)
+        anim = XAnim.Anim()
         
-    frame_scale = fps_scale_target_fps / anim.framerate if fps_scale_type == 'CUSTOM' else 1.0
+        if os.path.splitext(filepath)[-1].upper() == '.XANIM_BIN':
+            anim.LoadFile_Bin(filepath)
+        else:
+            anim.LoadFile_Raw(filepath, use_notetrack_file)
 
-    # Crazy (I was crazy once...)
-    if update_frame_range:
-        frames = [f.frame for f in anim.frames]
-        scene.frame_start = int(round(min(frames) * frame_scale))
-        scene.frame_end = int(round(max(frames) * frame_scale))
+        # Action!!!
+        action_name = os.path.basename(filepath).rsplit('.', 1)[0]
+        action = bpy.data.actions.new(action_name)
+        armature.animation_data_create().action = action
+        action.use_fake_user = True
 
-    # Bone mapping
-    part_indices = {p.name.lower(): i for i, p in enumerate(anim.parts)}
-    pose_bones = ob.pose.bones
-    
-    bone_map = {
-        bone.name: {
-            'bone': bone,
-            'part_index': part_indices[bone_name_lower], # To avoid calling it twice
-            'matrix_local': bone.bone.matrix_local,
-            'parent': None
+        if update_scene_fps:
+            scene.render.fps = int(anim.framerate)
+
+        if fps_scale_type == 'CUSTOM':
+            fps_scale = fps_scale_target_fps / anim.framerate
+
+        if update_frame_range:
+            frames = [f.frame for f in anim.frames]
+            scene.frame_start = int(round(min(frames) * fps_scale))
+            scene.frame_end = int(round(max(frames) * fps_scale))
+
+        part_indices = {p.name.lower(): i for i, p in enumerate(anim.parts)}
+        bone_map = {
+            bone.name: {
+                'bone': bone,
+                'part_index': part_indices[bone.name.lower()],
+                'matrix_local': bone.bone.matrix_local,
+                'parent': None
+            }
+            for bone in armature.pose.bones 
+            if bone.name.lower() in part_indices
         }
-        for bone in pose_bones if (bone_name_lower := bone.name.lower()) in part_indices
-    }
 
-    # Set parent relationships
-    for bone_data in bone_map.values():
-        parent = bone_data['bone'].parent
-        if parent and (parent_name := parent.name) in bone_map:
-            bone_data['parent'] = bone_map[parent_name]
-
-    # Keyframe insertion
-    for frame in anim.frames:
-        f = frame.frame * frame_scale
         for bone_data in bone_map.values():
-            parent_matrix = bone_data['parent']['matrix'] if bone_data['parent'] else Matrix()
-            part = frame.parts[bone_data['part_index']]
-            
-            mtx = Matrix(part.matrix).transposed().to_4x4()
-            mtx.translation = Vector(part.offset) * global_scale
-            bone_data['matrix'] = mtx
-            
-            bone = bone_data['bone']
-            bone.matrix_basis = calc_basis(bone, mtx, parent_matrix, bone_data['matrix_local'])
-            bone.keyframe_insert("location", frame=f)
-            bone.keyframe_insert("rotation_quaternion", frame=f)
+            parent = bone_data['bone'].parent
+            if parent and (parent_name := parent.name) in bone_map:
+                bone_data['parent'] = bone_map[parent_name]
 
-    # Handle Notetracks (They aren't visible as markers)
-    if use_notetracks:
-        markers = action.pose_markers
-        for note in anim.notes:
-            markers.new(note.string).frame = int(note.frame * frame_scale)
+        for frame in anim.frames:
+            f = frame.frame * fps_scale
+            for bone_data in bone_map.values():
+                parent_matrix = bone_data['parent']['matrix'] if bone_data['parent'] else Matrix()
 
-    context.view_layer.update()
-    return anim
+                part = frame.parts[bone_data['part_index']]
+                mtx = Matrix(part.matrix).transposed().to_4x4()
+                mtx.translation = Vector(part.offset) * global_scale
+                bone_data['matrix'] = mtx
+
+                bone = bone_data['bone']
+                bone.matrix_basis = calc_basis(bone, mtx, parent_matrix, bone_data['matrix_local'])
+                bone.keyframe_insert("location", frame=f)
+                bone.keyframe_insert("rotation_quaternion", frame=f)
+
+        if use_notetrack_file:
+            for note in anim.notes:
+                frame = int(note.frame * fps_scale)
+                action.pose_markers.new(note.string).frame = frame
+
+        context.view_layer.update()
 
 def get_mat_rest(pose_bone, parent_pose_matrix, parent_rest_matrix):
     bone = pose_bone.bone

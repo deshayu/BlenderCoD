@@ -15,9 +15,7 @@
 #  Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 #
 # ##### END GPL LICENSE BLOCK #####
-
-import os
-import importlib
+import os, time, importlib
 
 import bpy
 from bpy.types import Operator, AddonPreferences
@@ -31,7 +29,6 @@ from . import shared
 modules = ['shared', 'import_xmodel', 'import_xanim', 'export_xmodel', 'export_xanim']
 
 for module in modules:
-    # Dynamically import the module if not already imported
     if module not in globals():
         globals()[module] = importlib.import_module(f".{module}", package=__name__)
     # Reload the module
@@ -40,7 +37,7 @@ for module in modules:
 bl_info = {
     "name": "BlenderCoD",
     "author": "Ma_rv, CoDEmanX, Flybynyt, SE2Dev, shiversoftdev, tupivere_",
-    "version": (1, 0, 0),
+    "version": (1, 0, 2),
     "blender": (4, 0, 0),
     "location": "File > Import/Export",
     "description": "Import/Export Call of Duty XModels and XAnims",
@@ -83,60 +80,12 @@ class BlenderCoD_Preferences(AddonPreferences):
         update=update_submenu_mode
     )
 
-    unit_enum: EnumProperty(
-        items=(('CENTI', "Centimeters", ""),
-               ('MILLI', "Millimeters", ""),
-               ('METER', "Meters", ""),
-               ('KILO', "Kilometers", ""),
-               ('INCH', "Inches", ""),
-               ('FOOT', "Feet", ""),
-               ('YARD', "Yards", ""),
-               ('MILE', "Miles", ""),
-               ('CUSTOM', "Custom", ""),
-               ),
-        name="Default Unit",
-        description="The default unit to interpret one Blender Unit as when "
-                    "no units are specified in the scene presets",
-        default='INCH',
-        update=update_scale_length
-    )
-
-    scale_length: FloatProperty(
-        name="Unit Scale",
-        description="Scale factor to use, follows the same conventions as "
-                    "Blender's unit scale in the scene properties\n"
-                    "(Is the conversion factor to convert one Blender unit to "
-                    "one meter)",
-        soft_min=0.001,
-        soft_max=100.0,
-        min=0.00001,
-        max=100000.0,
-        precision=6,
-        step=1,
-        default=1.0
-    )
-
     def draw(self, context):
         layout = self.layout
         
         # Main toggle option
         row = layout.row()
         row.prop(self, "use_submenu")
-        
-        # Units settings
-        box = layout.box()
-        box.label(text="Scale Options")
-        
-        col = box.column(align=True)
-        row = col.row(align=True)
-        row.label(text="Units:")
-        row.prop(self, "unit_enum", text="")
-        
-        # Only show custom scale option when custom units are selected
-        if self.unit_enum == 'CUSTOM':
-            row = col.row(align=True)
-            row.prop(self, "scale_length")
-
 
 class COD_MT_import_xmodel(bpy.types.Operator, ImportHelper):
     bl_idname = "import_scene.xmodel"
@@ -166,16 +115,20 @@ class COD_MT_import_xmodel(bpy.types.Operator, ImportHelper):
     )
 
     apply_unit_scale: BoolProperty(
-        name="Apply Unit",
-        description="Scale all data according to current Blender size,"
-                    " to match CoD units",
+        name="Apply Unit Scale",
+        description=(
+            "Enable to automatically scale units for Call of Duty:\n"
+            "- Export: converts centimeters to inches (default CoD units).\n"
+            "- Import: converts inches to centimeters.\n"
+            "Disable this for older projects that already use inches; exporting then will scale them down further."
+        ),
         default=True,
     )
 
     use_single_mesh: BoolProperty(
         name="Combine Meshes",
         description="Combine all meshes in the file into a single object",  # nopep8
-        default=True
+        default=False
     )
 
     use_dup_tris: BoolProperty(
@@ -217,17 +170,24 @@ class COD_MT_import_xmodel(bpy.types.Operator, ImportHelper):
     )
 
     def execute(self, context):
-        from time import process_time
+        self.report({'INFO'}, "Importing XModel...")
 
-        start_time = process_time()
+        from . import import_xmodel
+        start_time = time.perf_counter()
+
         keywords = self.as_keywords(ignore=("filter_glob", "check_existing", "ui_tab"))
+
         result = import_xmodel.load(self, context, **keywords)
 
-        status, msg, ret = ('INFO', f"Import finished in {process_time() - start_time:.4f} sec.", 'FINISHED') \
-            if not result else ('ERROR', result, 'CANCELLED')
-        
-        self.report({status}, msg)
-        return {ret}
+        if not result:
+            self.report({'INFO'}, "Import finished in %s." % shared.timef(time.perf_counter() - start_time))
+            _ret_val = {'FINISHED'}
+        else:
+            self.report({'ERROR'}, result)
+            _ret_val = {'CANCELLED'}
+
+        shared.show_warnings()
+        return _ret_val
 
     @classmethod
     def poll(self, context):
@@ -236,27 +196,30 @@ class COD_MT_import_xmodel(bpy.types.Operator, ImportHelper):
     def draw(self, context):
         layout = self.layout
 
-        layout.prop(self, 'ui_tab', expand=True)
-        if self.ui_tab == 'MAIN':
-            # Orientation (Possibly)
-            # Axis Options (Possibly)
+        # ===== Scale Options =====
+        scale_box = layout.box()
+        scale_box.label(text="Scale Options", icon='FULLSCREEN_ENTER')
 
-            row = layout.row(align=True)
-            row.prop(self, "global_scale")
-            sub = row.row(align=True)
-            sub.prop(self, "apply_unit_scale", text="")
+        scale_row = scale_box.row(align=True)
+        scale_row.prop(self, "global_scale")
+        icon = 'SNAP_INCREMENT' if self.apply_unit_scale else 'SNAP_GRID'
+        scale_row.prop(self, "apply_unit_scale", text="Apply Unit Scale", icon=icon)
 
-            layout.prop(self, 'use_single_mesh')
+        # ===== General Options =====
+        gen_box = layout.box()
+        gen_box.label(text="General", icon='OPTIONS')
+        gen_box.prop(self, 'use_single_mesh')
+        gen_box.prop(self, 'use_custom_normals')
+        gen_box.prop(self, 'use_vertex_colors')
+        gen_box.prop(self, 'use_dup_tris')
+        gen_box.prop(self, 'use_image_search')
+        gen_box.prop(self, 'use_armature')
 
-            layout.prop(self, 'use_custom_normals')
-            layout.prop(self, 'use_vertex_colors')
-            layout.prop(self, 'use_dup_tris')
-            layout.prop(self, 'use_image_search')
-        elif self.ui_tab == 'ARMATURE':
-            layout.prop(self, 'use_armature')
-            col = layout.column()
-            col.enabled = self.use_armature
-            col.prop(self, 'use_parents')
+        # ===== Armature Options =====
+        if self.use_armature:
+            abox = layout.box()
+            abox.label(text="Armature Options", icon='ARMATURE_DATA')
+            abox.prop(self, 'use_parents')
 
 
 class COD_MT_import_xanim(bpy.types.Operator, ImportHelper):
@@ -297,7 +260,7 @@ class COD_MT_import_xanim(bpy.types.Operator, ImportHelper):
         name="Import NT_EXPORT File",
         description=("Automatically import the matching NT_EXPORT file "
                      "(if present) for each XANIM_EXPORT"),
-        default=True
+        default=False
     )
 
     fps_scale_type: EnumProperty(
@@ -334,17 +297,23 @@ class COD_MT_import_xanim(bpy.types.Operator, ImportHelper):
     )
 
     def execute(self, context):
-        from time import process_time
+        self.report({'INFO'}, "Importing XAnim...")
 
-        start_time = process_time()
-        result = import_xanim.load(self, context, self.apply_unit_scale, **self.as_keywords(ignore=("filter_glob", "files", "apply_unit_scale")))
+        from . import import_xanim
+        start_time = time.perf_counter()
 
-        elapsed = process_time() - start_time
-        status, msg, ret = ('INFO', f'Import finished in {elapsed:.4f} sec.', 'FINISHED') \
-            if not result else ('ERROR', result, 'CANCELLED')
-        
-        self.report({status}, msg)
-        return {ret}
+        ignored_properties = ("filter_glob", "files")
+        result = import_xanim.load(self, context, **self.as_keywords(ignore=ignored_properties))
+
+        if not result:
+            self.report({'INFO'}, "Import finished in %s." % shared.timef(time.perf_counter() - start_time))
+            _ret_val = {'FINISHED'}
+        else:
+            self.report({'ERROR'}, result)
+            _ret_val = {'CANCELLED'}
+
+        shared.show_warnings()
+        return _ret_val
 
     @classmethod
     def poll(self, context):
@@ -354,10 +323,13 @@ class COD_MT_import_xanim(bpy.types.Operator, ImportHelper):
         layout = self.layout
 
         # ===== Scale Options =====
-        scale_row = layout.row(align=True)
+        scale_box = layout.box()
+        scale_box.label(text="Scale Options", icon='FULLSCREEN_ENTER')
+
+        scale_row = scale_box.row(align=True)
         scale_row.prop(self, "global_scale")
-        unit_scale_sub = scale_row.row(align=True)
-        unit_scale_sub.prop(self, "apply_unit_scale", text="Apply Unit Scale", icon='SNAP_INCREMENT' if self.apply_unit_scale else 'SNAP_GRID')
+        icon = 'SNAP_INCREMENT' if self.apply_unit_scale else 'SNAP_GRID'
+        scale_row.prop(self, "apply_unit_scale", text="Apply Unit Scale", icon=icon)
 
         # ===== Notetracks Settings =====
         box = layout.box()
@@ -393,9 +365,6 @@ class COD_MT_export_xmodel(bpy.types.Operator, ExportHelper):
     filter_glob: StringProperty(
         default="*.XMODEL_EXPORT;*.XMODEL_BIN", options={'HIDDEN'})
 
-    # List of operator properties, the attributes will be assigned
-    # to the class instance from the operator settings before calling.
-
     # Used to map target_format values to actual file extensions
     format_ext_map = {
         'XMODEL_EXPORT': '.XMODEL_EXPORT',
@@ -412,8 +381,8 @@ class COD_MT_export_xmodel(bpy.types.Operator, ExportHelper):
         default='XMODEL_BIN'
     )
 
-    version: EnumProperty(
-        name="Version",
+    format_version: EnumProperty(
+        name="Format Version",
         description="XMODEL_EXPORT format version for export",
         items=(('5', "Version 5", "vCoD, CoD:UO"),
                ('6', "Version 6", "CoD2, CoD4, CoD:WaW, CoD:BO"),
@@ -454,7 +423,7 @@ class COD_MT_export_xmodel(bpy.types.Operator, ExportHelper):
         description=("Automatically calculate alpha channel for vertex colors "
                      "by averaging the RGB color values together "
                      "(if disabled, 1.0 is used)"),
-        default=False
+        default=True
     )
 
     use_vertex_colors_alpha_mode: EnumProperty(
@@ -516,16 +485,31 @@ class COD_MT_export_xmodel(bpy.types.Operator, ExportHelper):
     )
 
     def execute(self, context):
-        from time import process_time
+        self.report({'INFO'}, "Exporting XModel...")
 
-        start_time = process_time()
-        result = export_xmodel.save(self, context, **self.as_keywords(ignore=("filter_glob", "check_existing")))
+        from . import export_xmodel
+        start_time = time.perf_counter()
 
-        status, msg, ret = ('INFO', f"Export finished in {process_time() - start_time:.4f} sec.", 'FINISHED') \
-            if not result else ('ERROR', result, 'CANCELLED')
-        
-        self.report({status}, msg)
-        return {ret}
+        ignore = ("filter_glob", "check_existing")
+        result = None
+        try:
+            result = export_xmodel.save(self, context, **self.as_keywords(ignore=ignore))
+        except Exception as _e:
+            shared.add_warning(
+                "An error occurred while exporting the XModel!\n"
+                "Error:\n" + str(_e)
+            )
+            return {'CANCELLED'}
+
+        if not result:
+            self.report({'INFO'}, f"Export finished in {shared.timef(time.perf_counter() - start_time)}.")
+            _ret_val = {'FINISHED'}
+        else:
+            self.report({'INFO'}, result)
+            _ret_val = {'CANCELLED'}
+
+        shared.show_warnings()
+        return _ret_val
 
     @classmethod
     def poll(self, context):
@@ -554,59 +538,60 @@ class COD_MT_export_xmodel(bpy.types.Operator, ExportHelper):
     def draw(self, context):
         layout = self.layout
 
-        layout.prop(self, 'target_format', expand=True)
-        layout.prop(self, 'version')
+        # ===== Export Format & Version =====
+        box = layout.box()
+        box.label(text="Export Format & Version", icon='EXPORT')
+        box.prop(self, 'target_format', expand=True)
+        box.label(text="Format Version")
+        box.prop(self, 'format_version', text="")
 
-        # Calculate number of selected mesh objects
-        if context.mode in ('OBJECT', 'PAINT_WEIGHT'):
-            objects = bpy.data.objects
-            meshes_selected = len(
-                [m for m in objects if m.type == 'MESH' and m.select_get()])
+        if context.mode in {'OBJECT', 'PAINT_WEIGHT'}:
+            meshes_selected = sum(1 for obj in context.selected_objects if obj.type == 'MESH')
         else:
             meshes_selected = 0
 
-        layout.prop(self, 'use_selection',
-                    text="Selected Only (%d meshes)" % meshes_selected)
+        box.prop(self, 'use_selection', text=f"Selected Only ({meshes_selected} mesh{'es' if meshes_selected != 1 else ''})")
 
-        row = layout.row(align=True)
-        row.prop(self, "global_scale")
-        sub = row.row(align=True)
-        sub.prop(self, "apply_unit_scale", text="")
+        # ===== Scale Options =====
+        scale_box = layout.box()
+        scale_box.label(text="Scale Options", icon='FULLSCREEN_ENTER')
+        scale_row = scale_box.row(align=True)
+        scale_row.prop(self, "global_scale")
+        icon = 'SNAP_INCREMENT' if self.apply_unit_scale else 'SNAP_GRID'
+        scale_row.prop(self, "apply_unit_scale", text="Apply Unit Scale", icon=icon)
 
-        # Axis?
+        # ===== General Options =====
+        gen_box = layout.box()
+        gen_box.label(text="General", icon='OPTIONS')
+        gen_box.prop(self, 'use_vertex_cleanup')
+        if int(self.format_version) >= 6:
+            gen_box.prop(self, 'use_vertex_colors')
+        gen_box.prop(self, 'apply_modifiers')
+        gen_box.prop(self, 'use_armature')
 
-        sub = layout.split(factor=0.5)
-        sub.prop(self, 'apply_modifiers')
-        sub = sub.row()
-        sub.enabled = self.apply_modifiers
-        sub.prop(self, 'modifier_quality', expand=True)
+        # ===== Vertex Color Options =====
+        if self.use_vertex_colors and int(self.format_version) >= 6:
+            vbox = layout.box()
+            vbox.label(text="Vertex Color Options", icon='GROUP_VCOL')
+            vbox.prop(self, 'use_vertex_colors_alpha')
+            if self.use_vertex_colors_alpha:
+                row = vbox.row()
+                row.label(text="Alpha Layer")
+                row.prop(self, 'use_vertex_colors_alpha_mode', text="")
 
-        # layout.prop(self, 'custom_normals')
+        # ===== Modifier Options =====
+        if self.apply_modifiers:
+            mod_box = layout.box()
+            mod_box.label(text="Modifier Options", icon='MODIFIER')
+            mod_box.prop(self, 'modifier_quality', expand=True)
 
-        if int(self.version) >= 6:
-            row = layout.row()
-            row.prop(self, 'use_vertex_colors')
-            sub = row.split()
-            sub.enabled = self.use_vertex_colors
-            sub.prop(self, 'use_vertex_colors_alpha')
-            sub = layout.split()
-            sub.enabled = (self.use_vertex_colors and
-                           self.use_vertex_colors_alpha)
-            sub = sub.split(factor=0.5)
-            sub.label(text="Vertex Alpha Layer")
-            sub.prop(self, 'use_vertex_colors_alpha_mode', text="")
-
-        layout.prop(self, 'use_vertex_cleanup')
-
-        layout.prop(self, 'use_armature')
-        box = layout.box()
-        box.enabled = self.use_armature
-        sub = box.column(align=True)
-        sub.prop(self, 'use_weight_min')
-        sub = box.split(align=True)
-        sub.active = self.use_weight_min
-        sub.prop(self, 'use_weight_min_threshold')
-
+        # ===== Armature Options =====
+        if self.use_armature:
+            abox = layout.box()
+            abox.label(text="Armature Options", icon='ARMATURE_DATA')
+            abox.prop(self, 'use_weight_min')
+            if self.use_weight_min:
+                abox.prop(self, 'use_weight_min_threshold')
 
 class COD_MT_export_xanim(bpy.types.Operator, ExportHelper):
     bl_idname = "export_scene.xanim"
@@ -738,16 +723,22 @@ class COD_MT_export_xanim(bpy.types.Operator, ExportHelper):
     )
 
     def execute(self, context):
-        from time import process_time
+        self.report({'INFO'}, "Exporting XAnim...")
 
-        start_time = process_time()
+        from . import export_xanim
+        start_time = time.perf_counter()
         result = export_xanim.save(self, context, **self.as_keywords(ignore=("filter_glob", "check_existing")))
 
-        status, msg, ret = ('INFO', f"Export finished in {process_time() - start_time:.4f} sec.", 'FINISHED') \
-            if not result else ('ERROR', result, 'CANCELLED')
-        
-        self.report({status}, msg)
-        return {ret}
+        if not result:
+            msg = "Export finished in %s." % shared.timef(time.perf_counter() - start_time)
+            self.report({'INFO'}, msg)
+            _ret_val = {'FINISHED'}
+        else:
+            self.report({'ERROR'}, result)
+            _ret_val = {'CANCELLED'}
+
+        shared.show_warnings()
+        return _ret_val
 
     @classmethod
     def poll(self, context):
@@ -776,55 +767,55 @@ class COD_MT_export_xanim(bpy.types.Operator, ExportHelper):
     def draw(self, context):
         layout = self.layout
 
-        # ===== Export Format & Selection =====
-        layout.prop(self, 'target_format', expand=True)
-        layout.prop(self, 'use_selection', text="Export Selected Bones Only")
+        # ===== Export Format & Version =====
+        box = layout.box()
+        box.label(text="Export Format & Version", icon='EXPORT')
+        box.prop(self, 'target_format', expand=True)
+        box.prop(self, 'use_selection', text="Export Selected Bones Only")
 
         # ===== Scale Options =====
-        scale_row = layout.row(align=True)
+        scale_box = layout.box()
+        scale_box.label(text="Scale Options", icon='FULLSCREEN_ENTER')
+        scale_row = scale_box.row(align=True)
         scale_row.prop(self, "global_scale")
-        unit_scale_sub = scale_row.row(align=True)
-        unit_scale_sub.prop(self, "apply_unit_scale", text="Apply Unit Scale", icon='SNAP_INCREMENT' if self.apply_unit_scale else 'SNAP_GRID')
+        icon = 'SNAP_INCREMENT' if self.apply_unit_scale else 'SNAP_GRID'
+        scale_row.prop(self, "apply_unit_scale", text="Apply Unit Scale", icon=icon)
 
-        # ===== Action Export Options =====
-        action_count = len(bpy.data.actions)
-        action_row = layout.row()
-        action_row.enabled = action_count > 0
-        action_row.prop(
-            self, 
-            'use_all_actions',
-            text=f'Export All Actions ({action_count} action{"s" if action_count != 1 else ""})'
-        )
+        # ===== General Options =====
+        gen_box = layout.box()
+        gen_box.label(text="General", icon='OPTIONS')
+        gen_box.prop(self, 'use_all_actions', text="Export All Actions")
+
+        # Actions info (nested directly under toggle for visibility)
+        if self.use_all_actions:
+            action_count = len(bpy.data.actions)
+            row = gen_box.row()
+            row.enabled = action_count > 0
+            row.label(text=f"Detected {action_count} action{'s' if action_count != 1 else ''}", icon='ACTION')
+
+        gen_box.prop(self, 'use_notetracks', text="Export Notetracks")
+        gen_box.prop(self, 'use_custom_framerate', text="Override Scene Framerate")
+        gen_box.prop(self, 'use_frame_range_mode', expand=True)
+        gen_box.prop(self, 'write_tag_align', text="Write TAG_ALIGN", icon='ALIGN_CENTER')
 
         # ===== Notetrack Options =====
-        notetrack_box = layout.box()
-        notetrack_box.label(text="Notetracks", icon='MARKER_HLT')
-        notetrack_box.prop(self, 'use_notetracks', text="Export Notetracks")
-
         if self.use_notetracks:
-            notetrack_box.row().prop(self, 'use_notetrack_mode', expand=True)
-            
-            if self.use_notetrack_mode != 'NONE':
-                notetrack_box.prop(
-                    self, 
+            note_box = layout.box()
+            note_box.label(text="Notetrack Options", icon='MARKER_HLT')
+            note_box.prop(self, 'use_notetrack_mode', expand=True)
+
+            if self.target_format == 'XANIM_EXPORT':
+                note_box.prop(
+                    self,
                     'use_notetrack_file',
                     text="Export to .NT_EXPORT",
                     icon='FILE_TEXT' if self.use_notetrack_file else 'DOT'
                 )
 
-        # ===== Framerate Settings =====
-        framerate_box = layout.box()
-        framerate_box.label(text="Framerate Settings", icon='TIME')
-        
-        row = framerate_box.row()
-        row.prop(
-            self, 
-            'use_custom_framerate',
-            text="Override Scene Framerate",
-            toggle=True
-        )
-        
+        # ===== Framerate Options =====
         if self.use_custom_framerate:
+            framerate_box = layout.box()
+            framerate_box.label(text="Framerate", icon='TIME')
             row = framerate_box.row()
             row.prop(self, 'use_framerate', text="Framerate")
             if self.use_framerate <= 0:
@@ -832,23 +823,15 @@ class COD_MT_export_xanim(bpy.types.Operator, ExportHelper):
                 framerate_box.label(text="Invalid framerate (must be > 0)", icon='ERROR')
 
         # ===== Frame Range =====
-        frame_box = layout.box()
-        frame_box.label(text="Frame Range", icon='ARROW_LEFTRIGHT')
-        
-        row = frame_box.row()
-        row.prop(self, 'use_frame_range_mode', expand=True)
-        
         if self.use_frame_range_mode == 'CUSTOM':
+            frame_box = layout.box()
+            frame_box.label(text="Custom Frame Range", icon='ARROW_LEFTRIGHT')
             row = frame_box.row(align=True)
-            row.prop(self, 'frame_start', text="Start")  # Use frame_start_custom here
-            row.prop(self, 'frame_end', text="End")  # Use frame_end_custom here
-            
-            # Validation
+            row.prop(self, 'frame_start', text="Start")
+            row.prop(self, 'frame_end', text="End")
+
             if self.frame_start > self.frame_end:
                 frame_box.label(text="Warning: Start frame > End frame", icon='ERROR')
-
-        # ===== Write TAG_ALIGN =====
-        layout.prop(self, 'write_tag_align', text="Write TAG_ALIGN", icon='ALIGN_CENTER', toggle=True)
 
 class COD_MT_import_submenu(bpy.types.Menu):
     bl_idname = "COD_MT_import_submenu"

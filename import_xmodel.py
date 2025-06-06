@@ -18,10 +18,8 @@
 
 # <pep8 compliant>
 
-import os
-import bpy
-import bmesh
-import array
+import os, bpy, bmesh, array
+
 from mathutils import *
 from math import *
 from bpy_extras.image_utils import load_image
@@ -30,54 +28,24 @@ from mathutils import Vector
 from . import shared as shared
 from .PyCoD import xmodel as XModel
 
+def load(self, context, **kwargs):
 
-def get_armature_for_object(ob):
-    '''
-    Get the armature for a given object.
-    If the object *is* an armature, the object itself is returned.
-    '''
-    if ob is None:
-        return None
-
-    if ob.type == 'ARMATURE':
-        return ob
-
-    return ob.find_armature()
-
-def get_armature_modifier_for_object(ob):
-    for mod in ob.modifiers:
-        if mod.type == 'ARMATURE':
-            return mod
-    return None
-
-def reassign_children(ebs, bone1, bone2):
-    for child in bone2.children:
-        kid = ebs[child.name]
-        kid.parent = bone1
-
-    ebs.remove(bone2)
-
-def load(self, context,
-         filepath,
-         global_scale=1.0,
-         apply_unit_scale=False,
-         use_single_mesh=True,
-         use_dup_tris=True,
-         use_custom_normals=True,
-         use_vertex_colors=True,
-         use_armature=True,
-         use_parents=True,
-         use_image_search=True):
+    # Precompute kwargs
+    filepath = kwargs.get('filepath')
+    global_scale = kwargs.get('global_scale', 1.0)
+    use_single_mesh = kwargs.get('use_single_mesh', False)
+    use_dup_tris = kwargs.get('use_dup_tris', True)
+    use_custom_normals = kwargs.get('use_custom_normals', True)
+    use_vertex_colors = kwargs.get('use_vertex_colors', True)
+    use_armature = kwargs.get('use_armature', True)
+    split_meshes = not use_single_mesh
+    load_images = True  # hardcoded for now
 
     # Apply unit conversion factor to the scale
-    if apply_unit_scale:
-        global_scale *= shared.calculate_unit_scale_factor(context.scene)
+    if kwargs.get('apply_unit_scale', True):
+        global_scale = shared.apply_inch_to_cm_scale(kwargs.get('global_scale', 1.0))
 
-    target_scale = global_scale
-
-    split_meshes = not use_single_mesh
-    load_images = True
-
+    # Scene Context
     scene = bpy.context.scene
     view_layer = bpy.context.view_layer
         
@@ -86,18 +54,16 @@ def load(self, context,
     model = XModel.Model(model_name)
 
     ext = os.path.splitext(filepath)[1].upper()
-    LoadModelFile = model.LoadFile_Bin if ext == '.XMODEL_BIN' else model.LoadFile_Raw
-    LoadModelFile(filepath, split_meshes=split_meshes)
+    load_model_fn = model.LoadFile_Bin if ext == '.XMODEL_BIN' else model.LoadFile_Raw
+    load_model_fn(filepath, split_meshes=split_meshes)
 
-    # Materials
+    # Material, Mesh Object lists
     materials = []
+    mesh_objs = []
 
     for material in model.materials:
         mat = bpy.data.materials.get(material.name) or bpy.data.materials.new(name=material.name)
         materials.append(mat)
-
-    # Meshes
-    mesh_objs = []
 
     for sub_mesh in model.meshes:
         sub_mesh.name = f"{model.name}_mesh" if not split_meshes else sub_mesh.name
@@ -110,7 +76,7 @@ def load(self, context,
 
         # Add Verts
         for vert in sub_mesh.verts:
-            bm.verts.new(Vector(vert.offset) * target_scale)
+            bm.verts.new(Vector(vert.offset) * global_scale)
         bm.verts.ensure_lookup_table()
 
         # Lists
@@ -173,7 +139,7 @@ def load(self, context,
         if use_dup_tris:
             # Add duplicate verts
             for vert in dup_verts:
-                bm.verts.new(Vector(vert.offset) * target_scale)
+                bm.verts.new(Vector(vert.offset) * global_scale)
             bm.verts.ensure_lookup_table()
 
             # Add duplicate faces
@@ -289,8 +255,8 @@ def load(self, context,
             edit_bone = armature.edit_bones.new(bone.name.lower())
             edit_bone.use_local_location = False
 
-            offset = Vector(bone.offset) * target_scale
-            axis = Vector(bone.matrix[1]) * target_scale
+            offset = Vector(bone.offset) * global_scale
+            axis = Vector(bone.matrix[1]) * global_scale
             roll = Vector(bone.matrix[2])
 
             edit_bone.head = offset
