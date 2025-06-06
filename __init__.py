@@ -87,6 +87,15 @@ class BlenderCoD_Preferences(AddonPreferences):
         row = layout.row()
         row.prop(self, "use_submenu")
 
+class COD_MT_Exportable_Objects(bpy.types.UIList):
+    def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
+        if self.layout_type in {'DEFAULT', 'COMPACT'}:
+            layout.label(text=item.name, icon='MESH_DATA')
+        elif self.layout_type in {'GRID'}:
+            layout.alignment = 'CENTER'
+            layout.label(text="")
+
+
 class COD_MT_import_xmodel(bpy.types.Operator, ImportHelper):
     bl_idname = "import_scene.xmodel"
     bl_label = "Import XModel"
@@ -361,6 +370,9 @@ class COD_MT_export_xmodel(bpy.types.Operator, ExportHelper):
     bl_description = "Export a CoD XMODEL_EXPORT / XMODEL_BIN File"
     bl_options = {'PRESET'}
 
+    exportables: bpy.props.CollectionProperty(type=bpy.types.PropertyGroup)
+    exportables_index: bpy.props.IntProperty(default=0)
+
     filename_ext = ".XMODEL_EXPORT"
     filter_glob: StringProperty(
         default="*.XMODEL_EXPORT;*.XMODEL_BIN", options={'HIDDEN'})
@@ -499,7 +511,6 @@ class COD_MT_export_xmodel(bpy.types.Operator, ExportHelper):
                 "An error occurred while exporting the XModel!\n"
                 "Error:\n" + str(_e)
             )
-            return {'CANCELLED'}
 
         if not result:
             self.report({'INFO'}, f"Export finished in {shared.timef(time.perf_counter() - start_time)}.")
@@ -559,6 +570,24 @@ class COD_MT_export_xmodel(bpy.types.Operator, ExportHelper):
         scale_row.prop(self, "global_scale")
         icon = 'SNAP_INCREMENT' if self.apply_unit_scale else 'SNAP_GRID'
         scale_row.prop(self, "apply_unit_scale", text="Apply Unit Scale", icon=icon)
+
+        # ===== Exportables Preview =====
+        self.exportables.clear()
+        armature, exportables = shared.gather_exportable_objects(self, context, self.use_selection, True)
+
+        for obj in exportables:
+            self.exportables.add().name = obj.name
+
+        box = layout.box()
+        box.label(text="Exportables Preview", icon='MESH_DATA')
+
+        box.label(text=f"Armature: {armature.name}" if armature else "No armature found", icon='ARMATURE_DATA' if armature else 'ERROR')
+
+        if exportables:
+            box.label(text="Exportable Objects:")
+            box.template_list("COD_MT_Exportable_Objects", "", self, "exportables", self, "exportables_index", rows=5)
+        else:
+            box.label(text="No exportable mesh objects found", icon='INFO')
 
         # ===== General Options =====
         gen_box = layout.box()
@@ -880,12 +909,14 @@ def menu_func_export_submenu(self, context):
 
 classes = (
     BlenderCoD_Preferences,
+    COD_MT_Exportable_Objects,
     COD_MT_import_xmodel,
     COD_MT_import_xanim,
     COD_MT_export_xmodel,
     COD_MT_export_xanim,
     COD_MT_import_submenu,
-    COD_MT_export_submenu
+    COD_MT_export_submenu,
+    shared.PV_OT_message_list_popup
 )
 
 def register():
