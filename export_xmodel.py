@@ -361,7 +361,7 @@ def save(self, context, filepath, **kwargs):
     if kwargs.get('apply_unit_scale', True):
         global_scale = shared.apply_cm_to_inch_scale(kwargs.get('global_scale', 1.0))
 
-    use_vtx_cols = kwargs.get("format_version") < 6
+    use_vtx_cols = int(kwargs.get("format_version", 0)) < 6
 
     # Setup xmodel thing
     model = XModel.Model("$export")
@@ -468,9 +468,9 @@ def save(self, context, filepath, **kwargs):
     # output
     header_msg = shared.get_metadata_string(filepath)
     if kwargs['target_format'] == 'XMODEL_BIN':
-        model.WriteFile_Bin(filepath, version=int(kwargs['version']), header_message=header_msg)
+        model.WriteFile_Bin(filepath, version=int(kwargs['format_version']), header_message=header_msg)
     else:
-        model.WriteFile_Raw(filepath, version=int(kwargs['version']), header_message=header_msg)
+        model.WriteFile_Raw(filepath, version=int(kwargs['format_version']), header_message=header_msg)
 
     # Restore mode and update view
     bpy.ops.object.mode_set(mode=last_mode)
